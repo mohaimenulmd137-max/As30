@@ -99,6 +99,7 @@ fun ProjectHubScreen(
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
 
     var showNewProjectDialog by remember { mutableStateOf(false) }
+    var showAutoDocDialog by remember { mutableStateOf(false) }
     var renameTarget by remember { mutableStateOf<StudioProject?>(null) }
 
     val filteredProjects = remember(projects, searchQuery) {
@@ -127,7 +128,8 @@ fun ProjectHubScreen(
                     isBangla = isBangla,
                     projectCount = projects.size,
                     onToggleLanguage = { viewModel.toggleLanguage() },
-                    onNewBlankProject = { showNewProjectDialog = true }
+                    onNewBlankProject = { showNewProjectDialog = true },
+                    onAutoDocumentary = { showAutoDocDialog = true }
                 )
             }
 
@@ -313,6 +315,19 @@ fun ProjectHubScreen(
         )
     }
 
+    if (showAutoDocDialog) {
+        com.example.ui.editor.AutoDocumentaryBuilderDialog(
+            isBangla = isBangla,
+            onDismiss = { showAutoDocDialog = false },
+            onGenerate = { topic, note ->
+                showAutoDocDialog = false
+                viewModel.createAutoDocumentaryProject(topic, note) { newId ->
+                    onOpenProject(newId)
+                }
+            }
+        )
+    }
+
     renameTarget?.let { target ->
         RenameProjectDialog(
             currentName = target.name,
@@ -331,7 +346,8 @@ private fun StudioHeroHeader(
     isBangla: Boolean,
     projectCount: Int,
     onToggleLanguage: () -> Unit,
-    onNewBlankProject: () -> Unit
+    onNewBlankProject: () -> Unit,
+    onAutoDocumentary: () -> Unit
 ) {
     Box(
         modifier = Modifier
@@ -435,7 +451,7 @@ private fun StudioHeroHeader(
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Button(
                     onClick = onNewBlankProject,
@@ -444,17 +460,42 @@ private fun StudioHeroHeader(
                         contentColor = StudioObsidian
                     ),
                     shape = RoundedCornerShape(14.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp),
                     modifier = Modifier
                         .weight(1f)
-                        .height(50.dp)
+                        .height(48.dp)
                         .testTag("new_blank_project_button")
                 ) {
-                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(20.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = if (isBangla) "নতুন ব্ল্যাংক প্রজেক্ট" else "New Blank Project",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold
+                        text = if (isBangla) "নতুন প্রজেক্ট" else "Blank Project",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1
+                    )
+                }
+
+                Button(
+                    onClick = onAutoDocumentary,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = AmberDocumentary,
+                        contentColor = StudioObsidian
+                    ),
+                    shape = RoundedCornerShape(14.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(48.dp)
+                        .testTag("auto_doc_hub_button")
+                ) {
+                    Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = if (isBangla) "অটো ডকুমেন্টারি" else "Auto Doc",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1
                     )
                 }
 
@@ -462,19 +503,19 @@ private fun StudioHeroHeader(
                     color = StudioSurfaceElevated.copy(alpha = 0.85f),
                     shape = RoundedCornerShape(14.dp),
                     border = androidx.compose.foundation.BorderStroke(1.dp, StudioBorder),
-                    modifier = Modifier.height(50.dp)
+                    modifier = Modifier.height(48.dp)
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 14.dp),
+                        modifier = Modifier.padding(horizontal = 12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
                             imageVector = Icons.Default.Storage,
                             contentDescription = null,
                             tint = AmberDocumentary,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(16.dp)
                         )
-                        Spacer(modifier = Modifier.width(6.dp))
+                        Spacer(modifier = Modifier.width(5.dp))
                         Text(
                             text = "$projectCount",
                             style = MaterialTheme.typography.titleSmall,

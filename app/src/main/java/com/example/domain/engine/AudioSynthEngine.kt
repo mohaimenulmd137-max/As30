@@ -121,7 +121,7 @@ object AudioSynthEngine {
         val localMs = playheadMs - clip.startMs
         val remMs = clip.endMs - playheadMs
 
-        var gain = clip.audioConfig.volume
+        var gain = clip.audioConfig.volume * project.masterVolume
 
         // Fade In
         if (clip.audioConfig.fadeInMs > 0 && localMs < clip.audioConfig.fadeInMs) {
@@ -132,18 +132,31 @@ object AudioSynthEngine {
             gain *= (remMs.toFloat() / clip.audioConfig.fadeOutMs.toFloat()).coerceIn(0f, 1f)
         }
 
-        // Auto-Ducking: if this is MUSIC and autoDuckingEnabled, duck smoothly under VOICEOVER
+        // Smooth Attack/Release Auto-Ducking: Music smoothly lowers during Voiceover and swells back up
         if (clip.trackType == TrackType.MUSIC && clip.audioConfig.autoDuckingEnabled) {
-            val activeVo = project.clips.any { other ->
-                other.trackType == TrackType.VOICEOVER &&
-                    playheadMs in (other.startMs - 150L)..(other.endMs + 150L)
+            val floor = clip.audioConfig.duckingFloor.coerceIn(0.05f, 0.9f)
+            val attackMs = 250L
+            val releaseMs = 350L
+            var minDuckFactor = 1f
+            project.clips.filter { it.trackType == TrackType.VOICEOVER && !it.isHidden }.forEach { vo ->
+                val factor = when {
+                    playheadMs in vo.startMs..vo.endMs -> floor
+                    playheadMs in (vo.startMs - attackMs) until vo.startMs -> {
+                        val t = (playheadMs - (vo.startMs - attackMs)).toFloat() / attackMs
+                        1f - (1f - floor) * t
+                    }
+                    playheadMs in (vo.endMs + 1L)..(vo.endMs + releaseMs) -> {
+                        val t = (playheadMs - vo.endMs).toFloat() / releaseMs
+                        floor + (1f - floor) * t
+                    }
+                    else -> 1f
+                }
+                if (factor < minDuckFactor) minDuckFactor = factor
             }
-            if (activeVo) {
-                gain *= clip.audioConfig.duckingFloor.coerceIn(0.05f, 0.9f)
-            }
+            gain *= minDuckFactor
         }
 
-        // Noise reduction visual/gain clarity boost for Voiceover
+        // Noise reduction clarity boost for Voiceover
         if (clip.trackType == TrackType.VOICEOVER && clip.audioConfig.noiseReductionEnabled) {
             gain *= 1.08f
         }

@@ -8,27 +8,30 @@ import com.example.data.local.ProjectRepository
 import com.example.data.local.StudioDatabase
 import com.example.data.local.StudioPreferences
 import com.example.domain.engine.AudioSynthEngine
+import com.example.domain.engine.CustomFontManager
 import com.example.domain.engine.ExportResult
 import com.example.domain.engine.SpeedRampEngine
 import com.example.domain.engine.VideoExportEngine
 import com.example.domain.engine.VoiceoverRecorder
 import com.example.domain.model.AspectRatioPreset
 import com.example.domain.model.AudioConfig
-import com.example.domain.model.BlendModeOption
+import com.example.domain.model.ComparisonChartConfig
 import com.example.domain.model.ExportFps
+import com.example.domain.model.InvestigativeDocConfig
+import com.example.domain.model.InvestigativeToolType
 import com.example.domain.model.Keyframe
 import com.example.domain.model.LowerThirdTemplate
-import com.example.domain.model.LumetriColorGrade
-import com.example.domain.model.MaskConfig
 import com.example.domain.model.MediaSource
 import com.example.domain.model.PresetCatalog
 import com.example.domain.model.PreviewResolution
-import com.example.domain.model.SpeedRampProfile
 import com.example.domain.model.StudioFontOption
 import com.example.domain.model.StudioProject
 import com.example.domain.model.TextLayerConfig
 import com.example.domain.model.TimelineClip
+import com.example.domain.model.TrackLayerState
 import com.example.domain.model.TrackType
+import com.example.domain.model.VfxConfig
+import com.example.domain.model.VfxEffectType
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -90,14 +93,23 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         if (_project.value?.id == projectId) return
         viewModelScope.launch {
             val loaded = repository.getProject(projectId) ?: return@launch
+            val normalizedLayers = ensureAllTrackLayers(loaded.trackLayers)
+            val ready = loaded.copy(trackLayers = normalizedLayers)
             undoStack.clear()
             redoStack.clear()
             _canUndo.value = false
             _canRedo.value = false
-            _project.value = loaded
-            _selectedClipId.value = loaded.clips.firstOrNull()?.id
+            _project.value = ready
+            _selectedClipId.value = ready.clips.firstOrNull()?.id
             _playheadMs.value = 0L
         }
+    }
+
+    private fun ensureAllTrackLayers(existing: List<TrackLayerState>): List<TrackLayerState> {
+        val map = existing.associateBy { it.trackType }
+        return TrackType.entries.mapIndexed { idx, t ->
+            map[t] ?: TrackLayerState(trackType = t, order = idx)
+        }.sortedBy { it.order }
     }
 
     private fun commitProject(updated: StudioProject, pushUndo: Boolean = true) {
@@ -115,7 +127,8 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         )
         val normalized = updated.copy(
             totalDurationMs = recalculatedDuration,
-            lastEditedAt = System.currentTimeMillis()
+            lastEditedAt = System.currentTimeMillis(),
+            trackLayers = ensureAllTrackLayers(updated.trackLayers)
         )
         _project.value = normalized
         scheduleAutoSave(normalized)
@@ -181,22 +194,20 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
                     val activeProj = _project.value ?: break
                     val nowMs = _playheadMs.value
 
-                    // Check active video speed ramp multiplier
                     val activeVideo = activeProj.clips.firstOrNull {
-                        it.trackType == TrackType.VIDEO && nowMs in it.startMs..it.endMs
+                        it.trackType == TrackType.VIDEO && !it.isHidden && nowMs in it.startMs..it.endMs
                     }
                     val speedMult = if (activeVideo != null && activeVideo.durationMs > 0L) {
                         val norm = (nowMs - activeVideo.startMs).toFloat() / activeVideo.durationMs.toFloat()
                         SpeedRampEngine.evaluateSpeedAt(activeVideo.speedRamp, norm)
                     } else 1f
 
-                    // Trigger locked SFX when playhead enters clip start
                     activeProj.clips.forEach { clip ->
                         val sfxId = clip.lockedSfxId
-                        if (sfxId != null && abs(nowMs - clip.startMs) < 40L && lastTriggeredSfxClipId != clip.id) {
+                        if (sfxId != null && !clip.isHidden && abs(nowMs - clip.startMs) < 40L && lastTriggeredSfxClipId != clip.id) {
                             lastTriggeredSfxClipId = clip.id
                             PresetCatalog.sfxPresets.firstOrNull { it.id == sfxId }?.let { preset ->
-                                AudioSynthEngine.previewSfx(preset, clip.audioConfig.volume)
+                                AudioSynthEngine.previewSfx(preset, clip.audioConfig.volume * activeProj.masterVolume)
                             }
                         }
                     }
@@ -232,6 +243,87 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         commitProject(proj.copy(aspectRatio = ratio))
     }
 
+    fun toggleVideoPreview() {
+        val proj = _project.value ?: return
+        commitProject(proj.copy(videoTrackPreviewOn = !proj.videoTrackPreviewOn), pushUndo = false)
+    }
+
+    fun toggleEditMode() {
+        val proj = _project.value ?: return
+        commitProject(proj.copy(editModeOn = !proj.editModeOn), pushUndo = false)
+    }
+
+    fun toggleSafeZoneGuides() {
+        val proj = _project.value ?: return
+        commitProject(proj.copy(showSafeZoneGuides = !proj.showSafeZoneGuides), pushUndo = false)
+    }
+
+    fun setMasterVolume(volume: Float) {
+        val proj = _project.value ?: return
+        commitProject(proj.copy(masterVolume = volume.coerceIn(0f, 1.5f)), pushUndo = false)
+    }
+
+    fun moveTrackOrder(trackType: TrackType, delta: Int) {
+        val proj = _project.value ?: return
+        val sorted = proj.trackLayers.sortedBy { it.order }.toMutableList()
+        val idx = sorted.indexOfFirst { it.trackType == trackType }
+        if (idx < 0) return
+        val targetIdx = (idx + delta).coerceIn(0, sorted.lastIndex)
+        if (idx == targetIdx) return
+        val item = sorted.removeAt(idx)
+        sorted.add(targetIdx, item)
+        val reindexed = sorted.mapIndexed { i, state -> state.copy(order = i) }
+        commitProject(proj.copy(trackLayers = reindexed))
+    }
+
+    fun toggleTrackVisibility(trackType: TrackType) {
+        val proj = _project.value ?: return
+        val updated = proj.trackLayers.map {
+            if (it.trackType == trackType) it.copy(isVisible = !it.isVisible) else it
+        }
+        commitProject(proj.copy(trackLayers = updated))
+    }
+
+    fun toggleTrackLock(trackType: TrackType) {
+        val proj = _project.value ?: return
+        val updated = proj.trackLayers.map {
+            if (it.trackType == trackType) it.copy(isLocked = !it.isLocked) else it
+        }
+        commitProject(proj.copy(trackLayers = updated))
+    }
+
+    private fun isClipLocked(proj: StudioProject, clip: TimelineClip): Boolean {
+        if (clip.isLocked) return true
+        return proj.trackLayers.firstOrNull { it.trackType == clip.trackType }?.isLocked == true
+    }
+
+    fun toggleClipLock(clipId: String) {
+        val proj = _project.value ?: return
+        val newClips = proj.clips.map { if (it.id == clipId) it.copy(isLocked = !it.isLocked) else it }
+        commitProject(proj.copy(clips = newClips))
+    }
+
+    fun moveClipTime(clipId: String, newStartMs: Long, pushUndo: Boolean = false) {
+        val proj = _project.value ?: return
+        val clip = proj.clips.firstOrNull { it.id == clipId } ?: return
+        if (isClipLocked(proj, clip)) return
+        val clampedStart = newStartMs.coerceAtLeast(0L)
+        val newClips = proj.clips.map { if (it.id == clipId) it.copy(startMs = clampedStart) else it }
+        commitProject(proj.copy(clips = newClips), pushUndo = pushUndo)
+    }
+
+    fun trimClip(clipId: String, newStartMs: Long, newDurationMs: Long, pushUndo: Boolean = false) {
+        val proj = _project.value ?: return
+        val clip = proj.clips.firstOrNull { it.id == clipId } ?: return
+        if (isClipLocked(proj, clip)) return
+        val safeStart = newStartMs.coerceAtLeast(0L)
+        val safeDur = newDurationMs.coerceIn(500L, 120_000L)
+        val newClips = proj.clips.map {
+            if (it.id == clipId) it.copy(startMs = safeStart, durationMs = safeDur) else it
+        }
+        commitProject(proj.copy(clips = newClips), pushUndo = pushUndo)
+    }
+
     fun updateClip(clipId: String, pushUndo: Boolean = true, transform: (TimelineClip) -> TimelineClip) {
         val proj = _project.value ?: return
         val newClips = proj.clips.map { if (it.id == clipId) transform(it) else it }
@@ -246,10 +338,11 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         rotationDelta: Float
     ) {
         val proj = _project.value ?: return
+        if (!proj.editModeOn) return
         val clip = proj.clips.firstOrNull { it.id == clipId } ?: return
+        if (isClipLocked(proj, clip)) return
         val localMs = (_playheadMs.value - clip.startMs).coerceIn(0L, clip.durationMs)
 
-        // If clip has keyframes, update nearest keyframe within 350ms or update base transform
         val nearbyIdx = clip.keyframes.indexOfFirst { abs(it.timeOffsetMs - localMs) <= 350L }
         val updatedClip = if (nearbyIdx >= 0) {
             val kfs = clip.keyframes.toMutableList()
@@ -275,6 +368,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     fun addKeyframeAtPlayhead(clipId: String) {
         val proj = _project.value ?: return
         val clip = proj.clips.firstOrNull { it.id == clipId } ?: return
+        if (isClipLocked(proj, clip)) return
         val localMs = (_playheadMs.value - clip.startMs).coerceIn(0L, clip.durationMs)
         val existing = clip.keyframes.indexOfFirst { abs(it.timeOffsetMs - localMs) < 180L }
         val updatedKeyframes = if (existing >= 0) {
@@ -354,6 +448,20 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         _selectedClipId.value = clip.id
     }
 
+    fun importCustomFont(clipId: String, uri: Uri) {
+        val imported = CustomFontManager.importFontFromUri(getApplication(), uri) ?: return
+        val (fontPath, fontName) = imported
+        updateClip(clipId) { clip ->
+            val currentText = clip.textConfig ?: TextLayerConfig()
+            clip.copy(
+                textConfig = currentText.copy(
+                    customFontPath = fontPath,
+                    customFontName = fontName
+                )
+            )
+        }
+    }
+
     fun addAdjustmentLayer() {
         val proj = _project.value ?: return
         val clip = TimelineClip(
@@ -365,6 +473,137 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         )
         commitProject(proj.copy(clips = proj.clips + clip))
         _selectedClipId.value = clip.id
+    }
+
+    fun addVfxClip(effectType: VfxEffectType = VfxEffectType.ANAMORPHIC_FLARE) {
+        val proj = _project.value ?: return
+        val clip = TimelineClip(
+            trackType = TrackType.VFX,
+            title = effectType.labelBn,
+            startMs = _playheadMs.value,
+            durationMs = 5_000L,
+            vfxConfig = VfxConfig(effectType = effectType, intensity = 0.72f, speed = 1f)
+        )
+        commitProject(proj.copy(clips = proj.clips + clip))
+        _selectedClipId.value = clip.id
+    }
+
+    fun addComparisonChartClip(barCount: Int = 10) {
+        val proj = _project.value ?: return
+        val safeCount = barCount.coerceIn(2, 60)
+        val clip = TimelineClip(
+            trackType = TrackType.GRAPHICS,
+            title = "তুলনামূলক চার্ট ($safeCount)",
+            startMs = _playheadMs.value,
+            durationMs = 6_000L,
+            inAnimationId = "in_slide_up",
+            outAnimationId = "out_fade",
+            lockedSfxId = "sfx_whoosh_1",
+            chartConfig = ComparisonChartConfig(
+                title = "তুলনামূলক ডেটা চার্ট ($safeCount বার)",
+                unitSuffix = "%",
+                barCount = safeCount,
+                isHorizontal = true,
+                sortDescending = true,
+                animateGrowth = true,
+                bars = PresetCatalog.generateDefaultBars(safeCount)
+            )
+        )
+        commitProject(proj.copy(clips = proj.clips + clip))
+        _selectedClipId.value = clip.id
+    }
+
+    fun addComparisonGridClip(slotCount: Int = 3) {
+        val proj = _project.value ?: return
+        val safeSlots = slotCount.coerceIn(2, 4)
+        val clip = TimelineClip(
+            trackType = TrackType.GRAPHICS,
+            title = "$safeSlots-স্লট শেপ কম্পারিজন",
+            startMs = _playheadMs.value,
+            durationMs = 5_500L,
+            inAnimationId = "in_zoom_pop",
+            outAnimationId = "out_fade",
+            comparisonGrid = PresetCatalog.buildDefaultComparisonGrid(safeSlots)
+        )
+        commitProject(proj.copy(clips = proj.clips + clip))
+        _selectedClipId.value = clip.id
+    }
+
+    fun updateComparisonSlotMedia(clipId: String, slotId: String, uri: Uri, isVideo: Boolean, label: String) {
+        updateClip(clipId) { clip ->
+            val grid = clip.comparisonGrid ?: return@updateClip clip
+            val updatedSlots = grid.slots.map { slot ->
+                if (slot.id == slotId) {
+                    slot.copy(
+                        mediaSource = MediaSource(uriString = uri.toString(), isVideo = isVideo, label = label)
+                    )
+                } else slot
+            }
+            clip.copy(comparisonGrid = grid.copy(slots = updatedSlots))
+        }
+    }
+
+    fun addInvestigativeClip(toolType: InvestigativeToolType) {
+        val proj = _project.value ?: return
+        val defaultConfig = when (toolType) {
+            InvestigativeToolType.EVIDENCE_HIGHLIGHTER -> InvestigativeDocConfig(
+                toolType = toolType,
+                headline = "গোপন ফাইল নং-৪০২",
+                bodyText = "প্রাথমিক তদন্তে দেখা গেছে এই লেনদেনের পেছনে বড় সিন্ডিকেট জড়িত ছিল"
+            )
+            InvestigativeToolType.NEWSPAPER_LOUPE -> InvestigativeDocConfig(
+                toolType = toolType,
+                headline = "দৈনিক সংবাদ আর্কাইভ · ১৯৭৪",
+                bodyText = "ঐতিহাসিক প্রতিবেদন: অজানা সত্য উন্মোচিত হলো অনুসন্ধানী জরিপে"
+            )
+            InvestigativeToolType.REDACTION_CENSOR -> InvestigativeDocConfig(
+                toolType = toolType,
+                headline = "CLASSIFIED · TOP SECRET",
+                bodyText = "সংশ্লিষ্ট ব্যক্তির পরিচয় গোপন রাখা হয়েছে"
+            )
+            InvestigativeToolType.MAP_RADAR_ROUTE -> InvestigativeDocConfig(
+                toolType = toolType,
+                headline = "অপারেশন রুট ও রাডার ট্র্যাক",
+                pointALabel = "ঢাকা",
+                pointBLabel = "চট্টগ্রাম"
+            )
+            InvestigativeToolType.STAT_YEAR_COUNTER -> InvestigativeDocConfig(
+                toolType = toolType,
+                headline = "সময়কাল পরিবর্তন",
+                bodyText = "ঐতিহাসিক সময়ের ব্যবধান",
+                counterStart = 1952,
+                counterEnd = 2026,
+                counterPrefix = "",
+                counterSuffix = " সাল"
+            )
+            InvestigativeToolType.NONE -> InvestigativeDocConfig(toolType = InvestigativeToolType.EVIDENCE_HIGHLIGHTER)
+        }
+        val clip = TimelineClip(
+            trackType = TrackType.GRAPHICS,
+            title = toolType.labelBn.take(20),
+            startMs = _playheadMs.value,
+            durationMs = 5_500L,
+            inAnimationId = "in_cinema_reveal",
+            outAnimationId = "out_fade",
+            lockedSfxId = "sfx_type_1",
+            investigativeConfig = defaultConfig
+        )
+        commitProject(proj.copy(clips = proj.clips + clip))
+        _selectedClipId.value = clip.id
+    }
+
+    fun generateAutoDocumentaryIntoCurrent(topic: String, scriptNote: String) {
+        val proj = _project.value ?: return
+        val generated = PresetCatalog.buildAutoInvestigativeDocumentary(topic, scriptNote)
+        val merged = proj.copy(
+            name = generated.name,
+            aspectRatio = generated.aspectRatio,
+            totalDurationMs = generated.totalDurationMs,
+            clips = generated.clips
+        )
+        commitProject(merged)
+        _selectedClipId.value = merged.clips.firstOrNull()?.id
+        _playheadMs.value = 0L
     }
 
     fun addAudioClip(uri: Uri?, label: String, isVoiceover: Boolean, recordedPath: String? = null, durationMs: Long = 6_000L) {
@@ -390,6 +629,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         val proj = _project.value ?: return
         val id = _selectedClipId.value ?: return
         val clip = proj.clips.firstOrNull { it.id == id } ?: return
+        if (isClipLocked(proj, clip)) return
         val splitAt = _playheadMs.value
         if (splitAt <= clip.startMs + 350L || splitAt >= clip.endMs - 350L) return
 
@@ -416,7 +656,8 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         val clone = clip.copy(
             id = UUID.randomUUID().toString(),
             startMs = clip.endMs + 150L,
-            title = "${clip.title} *"
+            title = "${clip.title} *",
+            isLocked = false
         )
         commitProject(proj.copy(clips = proj.clips + clone))
         _selectedClipId.value = clone.id
@@ -425,6 +666,8 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     fun deleteSelectedClip() {
         val proj = _project.value ?: return
         val id = _selectedClipId.value ?: return
+        val clip = proj.clips.firstOrNull { it.id == id } ?: return
+        if (isClipLocked(proj, clip)) return
         val remaining = proj.clips.filterNot { it.id == id }
         commitProject(proj.copy(clips = remaining))
         _selectedClipId.value = remaining.firstOrNull()?.id

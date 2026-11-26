@@ -66,6 +66,14 @@ class ProjectHubViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
+    fun createAutoDocumentaryProject(topic: String, scriptNote: String, onCreated: (String) -> Unit) {
+        viewModelScope.launch {
+            val doc = com.example.domain.model.PresetCatalog.buildAutoInvestigativeDocumentary(topic, scriptNote)
+            repository.saveProject(doc)
+            onCreated(doc.id)
+        }
+    }
+
     fun renameProject(project: StudioProject, newName: String) {
         if (newName.isBlank()) return
         viewModelScope.launch {

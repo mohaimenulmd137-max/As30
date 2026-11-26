@@ -2,7 +2,6 @@ package com.example.domain.model
 
 object PresetCatalog {
 
-    // 54 Motion Animations across IN (18), OUT (18), LOOP (18)
     val motionAnimations: List<MotionAnimationSpec> = listOf(
         // IN (18)
         MotionAnimationSpec("in_none", "None", "অ্যানিমেশন নেই", AnimationCategory.IN),
@@ -65,9 +64,7 @@ object PresetCatalog {
         MotionAnimationSpec("loop_tilt_rock", "Tilt Rock", "টিল্ট রক", AnimationCategory.LOOP)
     )
 
-    // 52 Synthesized SFX Presets
     val sfxPresets: List<SfxPreset> = buildList {
-        // Whooshes (10)
         val whooshSpecs = listOf(
             "Fast Air Whoosh" to 320, "Deep Cinema Whoosh" to 520, "Whip Pan Swoosh" to 260,
             "Reverse Riser Swish" to 600, "Wind Pass By" to 450, "Silk Slide Whoosh" to 300,
@@ -76,7 +73,6 @@ object PresetCatalog {
         whooshSpecs.forEachIndexed { i, (name, dur) ->
             add(SfxPreset("sfx_whoosh_$i", name, name, SfxCategory.WHOOSH, dur, 180f + i * 35f, 950f + i * 80f, SynthWaveform.SWEEP_UP, 0.72f))
         }
-        // Pop & UI (10)
         val popSpecs = listOf(
             "Clean Bubble Pop" to 110, "Glass Click" to 85, "Modern UI Tap" to 70,
             "Soft Notification" to 190, "Wooden Pluck" to 130, "Camera Shutter" to 140,
@@ -85,7 +81,6 @@ object PresetCatalog {
         popSpecs.forEachIndexed { i, (name, dur) ->
             add(SfxPreset("sfx_pop_$i", name, name, SfxCategory.POP, dur, 520f + i * 90f, 1280f + i * 60f, SynthWaveform.SINE, 0.08f))
         }
-        // Impact (9)
         val impactSpecs = listOf(
             "Documentary Boom" to 680, "Sub Bass Drop" to 750, "Trailer Hit" to 540,
             "Anvil Strike" to 460, "Door Slam Thud" to 350, "Heartbeat Thump" to 260,
@@ -94,7 +89,6 @@ object PresetCatalog {
         impactSpecs.forEachIndexed { i, (name, dur) ->
             add(SfxPreset("sfx_impact_$i", name, name, SfxCategory.IMPACT, dur, 160f - i * 8f, 38f, SynthWaveform.SWEEP_DOWN, 0.35f))
         }
-        // Typing (8)
         val typingSpecs = listOf(
             "Mechanical Key Click" to 75, "Typewriter Carriage" to 180, "Vintage Keystroke" to 90,
             "Subtitle Tick" to 65, "Morse Beep" to 120, "Digital Counter" to 80,
@@ -103,7 +97,6 @@ object PresetCatalog {
         typingSpecs.forEachIndexed { i, (name, dur) ->
             add(SfxPreset("sfx_type_$i", name, name, SfxCategory.TYPING, dur, 1100f + i * 120f, 880f, SynthWaveform.SQUARE, 0.42f))
         }
-        // Cinema (8)
         val cinemaSpecs = listOf(
             "Tension Riser" to 950, "Warm Pad Swell" to 850, "Broadcast Sting" to 500,
             "Film Reel Start" to 420, "Horizon Chime" to 720, "Time Freeze" to 640,
@@ -112,7 +105,6 @@ object PresetCatalog {
         cinemaSpecs.forEachIndexed { i, (name, dur) ->
             add(SfxPreset("sfx_cinema_$i", name, name, SfxCategory.CINEMA, dur, 220f + i * 30f, 540f + i * 45f, SynthWaveform.TRIANGLE, 0.18f))
         }
-        // Glitch (7)
         val glitchSpecs = listOf(
             "VHS Static Burst" to 220, "Digital Tear" to 180, "Cyber Zap" to 250,
             "Data Corrupt" to 290, "Signal Drop" to 340, "Radio Tuning" to 400, "Pixel Snap" to 150
@@ -123,26 +115,11 @@ object PresetCatalog {
     }
 
     val speedRampPresets: List<SpeedRampProfile> = listOf(
-        SpeedRampProfile(
-            "Normal (1.0x)",
-            listOf(SpeedPoint(0f, 1f), SpeedPoint(0.5f, 1f), SpeedPoint(1f, 1f))
-        ),
-        SpeedRampProfile(
-            "Hero Slow-Mo Dip",
-            listOf(SpeedPoint(0f, 1.8f), SpeedPoint(0.35f, 0.3f), SpeedPoint(0.65f, 0.3f), SpeedPoint(1f, 2.0f))
-        ),
-        SpeedRampProfile(
-            "Bullet Time",
-            listOf(SpeedPoint(0f, 3.0f), SpeedPoint(0.25f, 0.25f), SpeedPoint(0.75f, 0.25f), SpeedPoint(1f, 3.0f))
-        ),
-        SpeedRampProfile(
-            "Montage Surge",
-            listOf(SpeedPoint(0f, 0.6f), SpeedPoint(0.5f, 2.4f), SpeedPoint(1f, 0.8f))
-        ),
-        SpeedRampProfile(
-            "Documentary Glide",
-            listOf(SpeedPoint(0f, 1.0f), SpeedPoint(0.5f, 0.65f), SpeedPoint(1f, 1.0f))
-        )
+        SpeedRampProfile("Normal (1.0x)", listOf(SpeedPoint(0f, 1f), SpeedPoint(0.5f, 1f), SpeedPoint(1f, 1f))),
+        SpeedRampProfile("Hero Slow-Mo Dip", listOf(SpeedPoint(0f, 1.8f), SpeedPoint(0.35f, 0.3f), SpeedPoint(0.65f, 0.3f), SpeedPoint(1f, 2.0f))),
+        SpeedRampProfile("Bullet Time", listOf(SpeedPoint(0f, 3.0f), SpeedPoint(0.25f, 0.25f), SpeedPoint(0.75f, 0.25f), SpeedPoint(1f, 3.0f))),
+        SpeedRampProfile("Montage Surge", listOf(SpeedPoint(0f, 0.6f), SpeedPoint(0.5f, 2.4f), SpeedPoint(1f, 0.8f))),
+        SpeedRampProfile("Documentary Glide", listOf(SpeedPoint(0f, 1.0f), SpeedPoint(0.5f, 0.65f), SpeedPoint(1f, 1.0f)))
     )
 
     data class LumetriPreset(val name: String, val nameBn: String, val grade: LumetriColorGrade)
@@ -180,6 +157,412 @@ object PresetCatalog {
         )
     )
 
+    val textColorSwatches: List<Long> = listOf(
+        0xFFF3F6FC, // Pure Cinema White
+        0xFFFFB300, // Hollywood Gold
+        0xFF00E5FF, // Cyan Neon
+        0xFFFF4D6D, // Thriller Crimson
+        0xFF2CE59B, // Emerald Mint
+        0xFFA77BFF, // Royal Violet
+        0xFFFF7A00, // Sunset Amber
+        0xFF38BDF8, // Sky Electric
+        0xFFFDE047, // Marker Yellow
+        0xFFF472B6, // Rose Neon
+        0xFFEDE0C8, // Vintage Parchment
+        0xFF101522, // Obsidian Dark
+        0xFF0A0C12, // Deep Ink Black
+        0xFF94A3B8  // Steel Silver
+    )
+
+    val textStylePresets: List<TextStylePreset> = listOf(
+        TextStylePreset(
+            id = "style_clean",
+            nameBn = "ক্লিন সিনেমা",
+            nameEn = "Clean Cinema",
+            fontId = StudioFontOption.HIND_SILIGURI.id,
+            textColorHex = 0xFFF3F6FC,
+            accentColorHex = 0xFFFFB300,
+            shadowRadius = 8f
+        ),
+        TextStylePreset(
+            id = "style_hollywood_gold",
+            nameBn = "হলিউড গোল্ড",
+            nameEn = "Hollywood Gold",
+            fontId = StudioFontOption.PLAYFAIR_DISPLAY.id,
+            textColorHex = 0xFFFFD54F,
+            accentColorHex = 0xFFFFB300,
+            useGradient = true,
+            gradientStartHex = 0xFFFFF3B0,
+            gradientEndHex = 0xFFFF9800,
+            strokeColorHex = 0xFF2B1B00,
+            strokeWidthPx = 2.5f,
+            shadowRadius = 14f,
+            shadowColorHex = 0xDD000000,
+            letterSpacingSp = 1.5f
+        ),
+        TextStylePreset(
+            id = "style_neon_cyan",
+            nameBn = "নিয়ন গ্লো",
+            nameEn = "Cyan Neon",
+            fontId = StudioFontOption.SPACE_GROTESK.id,
+            textColorHex = 0xFF00E5FF,
+            accentColorHex = 0xFF38BDF8,
+            strokeColorHex = 0xFF042F3B,
+            strokeWidthPx = 2f,
+            shadowRadius = 20f,
+            shadowColorHex = 0xEE00E5FF,
+            letterSpacingSp = 1.2f
+        ),
+        TextStylePreset(
+            id = "style_breaking_news",
+            nameBn = "ব্রেকিং নিউজ",
+            nameEn = "Breaking News",
+            fontId = StudioFontOption.NOTO_SANS_BENGALI.id,
+            textColorHex = 0xFFFFFFFF,
+            accentColorHex = 0xFFFF3B30,
+            backgroundPill = true,
+            pillColorHex = 0xE67F1D1D,
+            strokeColorHex = 0xFF1A0505,
+            strokeWidthPx = 1.5f,
+            lowerThirdTemplate = LowerThirdTemplate.NEWS_LOWER_THIRD
+        ),
+        TextStylePreset(
+            id = "style_doc_serif",
+            nameBn = "আর্কাইভ সেরিফ",
+            nameEn = "Archive Serif",
+            fontId = StudioFontOption.NOTO_SERIF_BENGALI.id,
+            textColorHex = 0xFFF5ECD8,
+            accentColorHex = 0xFFD97706,
+            backgroundPill = true,
+            pillColorHex = 0xDF1C1917,
+            shadowRadius = 6f,
+            lowerThirdTemplate = LowerThirdTemplate.DOCUMENTARY_DATE_CARD
+        ),
+        TextStylePreset(
+            id = "style_bold_stroke",
+            nameBn = "বোল্ড স্ট্রোক",
+            nameEn = "Impact Stroke",
+            fontId = StudioFontOption.HIND_SILIGURI.id,
+            textColorHex = 0xFFFFFFFF,
+            accentColorHex = 0xFFFDE047,
+            strokeColorHex = 0xFF000000,
+            strokeWidthPx = 6.5f,
+            shadowRadius = 10f,
+            shadowColorHex = 0xFF000000
+        ),
+        TextStylePreset(
+            id = "style_sunset_grad",
+            nameBn = "সানসেট গ্রেডিয়েন্ট",
+            nameEn = "Sunset Gradient",
+            fontId = StudioFontOption.HIND_SILIGURI.id,
+            textColorHex = 0xFFFF7A00,
+            accentColorHex = 0xFFFF4D6D,
+            useGradient = true,
+            gradientStartHex = 0xFFFF4D6D,
+            gradientEndHex = 0xFFFFD166,
+            strokeColorHex = 0xFF1F0A14,
+            strokeWidthPx = 2.5f,
+            shadowRadius = 12f
+        ),
+        TextStylePreset(
+            id = "style_cyber_electric",
+            nameBn = "সাইবার ইলেকট্রিক",
+            nameEn = "Cyber Electric",
+            fontId = StudioFontOption.SPACE_GROTESK.id,
+            textColorHex = 0xFFA77BFF,
+            accentColorHex = 0xFF00E5FF,
+            useGradient = true,
+            gradientStartHex = 0xFF00E5FF,
+            gradientEndHex = 0xFFA77BFF,
+            strokeColorHex = 0xFF090D16,
+            strokeWidthPx = 3f,
+            shadowRadius = 18f,
+            shadowColorHex = 0xCC7C3AED,
+            letterSpacingSp = 1.8f
+        ),
+        TextStylePreset(
+            id = "style_glass_pill",
+            nameBn = "গ্লাস ক্যাপশন",
+            nameEn = "Glass Minimal",
+            fontId = StudioFontOption.NOTO_SANS_BENGALI.id,
+            textColorHex = 0xFFF8FAFC,
+            accentColorHex = 0xFF2CE59B,
+            backgroundPill = true,
+            pillColorHex = 0xB81E293B,
+            shadowRadius = 4f,
+            lowerThirdTemplate = LowerThirdTemplate.MINIMAL_CAPTION
+        ),
+        TextStylePreset(
+            id = "style_typewriter_evidence",
+            nameBn = "টাইপরাইটার নথি",
+            nameEn = "Evidence Mono",
+            fontId = StudioFontOption.JETBRAINS_MONO.id,
+            textColorHex = 0xFF111827,
+            accentColorHex = 0xFFB45309,
+            backgroundPill = true,
+            pillColorHex = 0xF0EFE6D5,
+            shadowRadius = 0f,
+            letterSpacingSp = 1.4f
+        ),
+        TextStylePreset(
+            id = "style_crimson_thriller",
+            nameBn = "থ্রিলার রেড",
+            nameEn = "Crimson Thriller",
+            fontId = StudioFontOption.NOTO_SERIF_BENGALI.id,
+            textColorHex = 0xFFFF4D6D,
+            accentColorHex = 0xFFFFB300,
+            useGradient = true,
+            gradientStartHex = 0xFFFF4D6D,
+            gradientEndHex = 0xFF991B1B,
+            strokeColorHex = 0xFF000000,
+            strokeWidthPx = 3.5f,
+            shadowRadius = 16f,
+            shadowColorHex = 0xCCFF1E42
+        ),
+        TextStylePreset(
+            id = "style_emerald_tech",
+            nameBn = "এমেরাল্ড টেক",
+            nameEn = "Emerald Tech",
+            fontId = StudioFontOption.JETBRAINS_MONO.id,
+            textColorHex = 0xFF2CE59B,
+            accentColorHex = 0xFF00E5FF,
+            backgroundPill = true,
+            pillColorHex = 0xDC06211A,
+            strokeColorHex = 0xFF022C22,
+            strokeWidthPx = 1.5f,
+            shadowRadius = 14f,
+            shadowColorHex = 0x992CE59B
+        ),
+        TextStylePreset(
+            id = "style_vintage_sepia",
+            nameBn = "ভিন্টেজ সেপিয়া",
+            nameEn = "Vintage Sepia",
+            fontId = StudioFontOption.NOTO_SERIF_BENGALI.id,
+            textColorHex = 0xFFFDE68A,
+            accentColorHex = 0xFFF59E0B,
+            strokeColorHex = 0xFF451A03,
+            strokeWidthPx = 2f,
+            shadowRadius = 8f,
+            shadowColorHex = 0xCC291202
+        ),
+        TextStylePreset(
+            id = "style_royal_violet",
+            nameBn = "রয়্যাল পার্পল",
+            nameEn = "Royal Violet",
+            fontId = StudioFontOption.PLAYFAIR_DISPLAY.id,
+            textColorHex = 0xFFE9D5FF,
+            accentColorHex = 0xFFF472B6,
+            useGradient = true,
+            gradientStartHex = 0xFFF472B6,
+            gradientEndHex = 0xFF8B5CF6,
+            strokeColorHex = 0xFF1E1B4B,
+            strokeWidthPx = 2f,
+            shadowRadius = 14f
+        ),
+        TextStylePreset(
+            id = "style_high_contrast",
+            nameBn = "হাই-কনট্রাস্ট সাব",
+            nameEn = "High Contrast Sub",
+            fontId = StudioFontOption.HIND_SILIGURI.id,
+            textColorHex = 0xFFFDE047,
+            accentColorHex = 0xFFFFFFFF,
+            backgroundPill = true,
+            pillColorHex = 0xEB000000,
+            strokeColorHex = 0xFF000000,
+            strokeWidthPx = 3f,
+            shadowRadius = 4f
+        ),
+        TextStylePreset(
+            id = "style_outline_hollow",
+            nameBn = "ডাবল বর্ডার",
+            nameEn = "Neon Outline",
+            fontId = StudioFontOption.SPACE_GROTESK.id,
+            textColorHex = 0xFF0A0C12,
+            accentColorHex = 0xFF00E5FF,
+            strokeColorHex = 0xFF00E5FF,
+            strokeWidthPx = 5.5f,
+            shadowRadius = 12f,
+            shadowColorHex = 0xCC00E5FF,
+            letterSpacingSp = 2.0f
+        )
+    )
+
+    fun applyTextStylePreset(current: TextLayerConfig, preset: TextStylePreset): TextLayerConfig {
+        return current.copy(
+            stylePresetId = preset.id,
+            fontId = if (current.customFontPath == null) preset.fontId else current.fontId,
+            textColorHex = preset.textColorHex,
+            accentColorHex = preset.accentColorHex,
+            useGradient = preset.useGradient,
+            gradientStartHex = preset.gradientStartHex,
+            gradientEndHex = preset.gradientEndHex,
+            strokeColorHex = preset.strokeColorHex,
+            strokeWidthPx = preset.strokeWidthPx,
+            shadowRadius = preset.shadowRadius,
+            shadowColorHex = preset.shadowColorHex,
+            letterSpacingSp = preset.letterSpacingSp,
+            backgroundPill = preset.backgroundPill,
+            pillColorHex = preset.pillColorHex,
+            lowerThirdTemplate = preset.lowerThirdTemplate
+        )
+    }
+
+    private val chartPalette = listOf(
+        0xFF00E5FFL, 0xFFFFB300L, 0xFFFF4D6DL, 0xFF2CE59BL,
+        0xFFA77BFFL, 0xFF38BDF8L, 0xFFFB7185L, 0xFFFACC15L
+    )
+
+    fun generateDefaultBars(count: Int): List<ChartBarItem> {
+        val safeCount = count.coerceIn(2, 60)
+        val labels = listOf(
+            "ঢাকা", "চট্টগ্রাম", "রাজশাহী", "খুলনা", "সিলেট", "বরিশাল", "রংপুর", "ময়মনসিংহ",
+            "গাজীপুর", "নারায়ণগঞ্জ", "কুমিল্লা", "বগুড়া", "যশোর", "দিনাজপুর", "টাঙ্গাইল", "ফরিদপুর"
+        )
+        return (0 until safeCount).map { idx ->
+            val label = if (idx < labels.size) labels[idx] else "আইটেম ${idx + 1}"
+            val valNum = ((safeCount - idx) * (95f / safeCount) + ((idx * 17) % 19)).coerceIn(8f, 100f)
+            ChartBarItem(
+                id = "bar_$idx",
+                label = label,
+                value = valNum,
+                colorHex = chartPalette[idx % chartPalette.size]
+            )
+        }
+    }
+
+    fun buildDefaultComparisonGrid(slotCount: Int): ComparisonGridConfig {
+        val drawables = listOf("img_tpl_documentary", "img_tpl_street_cinema", "img_tpl_motion", "img_studio_hero")
+        val shapes = listOf(GeometricShape.HEXAGON, GeometricShape.CIRCLE, GeometricShape.DIAMOND, GeometricShape.SHIELD)
+        val captions = listOf("দৃশ্য ১ · ১৯৭১", "দৃশ্য ২ · ২০২৬", "তথ্য ৩ · আর্কাইভ", "তথ্য ৪ · ম্যাপ")
+        val count = slotCount.coerceIn(2, 4)
+        return ComparisonGridConfig(
+            title = "তুলনামূলক দৃশ্য ($count)",
+            slotCount = count,
+            slots = (0 until count).map { i ->
+                ComparisonSlot(
+                    id = "slot_$i",
+                    caption = captions[i],
+                    shape = shapes[i],
+                    borderColorHex = chartPalette[i],
+                    mediaSource = MediaSource(drawableName = drawables[i % drawables.size], label = captions[i])
+                )
+            }
+        )
+    }
+
+    /**
+     * Generates a complete multi-track Investigative Documentary project automatically
+     * from a user's topic or script lines!
+     */
+    fun buildAutoInvestigativeDocumentary(topic: String, scriptNote: String): StudioProject {
+        val cleanTopic = topic.ifBlank { "অজানা অনুসন্ধান · গোপন আর্কাইভ" }
+        val cleanNote = scriptNote.ifBlank { "ঐতিহাসিক নথি ও পরিসংখ্যান বিশ্লেষণ অনুযায়ী চাঞ্চল্যকর তথ্য" }
+        return StudioProject(
+            name = cleanTopic.take(26),
+            aspectRatio = AspectRatioPreset.LANDSCAPE_16_9,
+            previewResolution = PreviewResolution.P1080,
+            thumbnailDrawable = "img_tpl_documentary",
+            totalDurationMs = 18_000L,
+            clips = listOf(
+                TimelineClip(
+                    trackType = TrackType.VIDEO,
+                    title = "আর্কাইভ ফুটেজ",
+                    startMs = 0L,
+                    durationMs = 9_000L,
+                    loopAnimationId = "loop_ken_burns",
+                    mediaSource = MediaSource(drawableName = "img_tpl_documentary", label = "Archive Base")
+                ),
+                TimelineClip(
+                    trackType = TrackType.VIDEO,
+                    title = "রাতের অনুসন্ধান",
+                    startMs = 9_000L,
+                    durationMs = 9_000L,
+                    loopAnimationId = "loop_zoom_creep",
+                    mediaSource = MediaSource(drawableName = "img_tpl_street_cinema", label = "Night Investigation")
+                ),
+                TimelineClip(
+                    trackType = TrackType.VFX,
+                    title = "৩৫মিমি ফিল্ম + ফ্লেয়ার",
+                    startMs = 0L,
+                    durationMs = 18_000L,
+                    vfxConfig = VfxConfig(VfxEffectType.FILM_GRAIN, intensity = 0.6f, speed = 1f)
+                ),
+                TimelineClip(
+                    trackType = TrackType.ADJUSTMENT,
+                    title = "হলিউড ডক গ্রেড",
+                    startMs = 0L,
+                    durationMs = 18_000L,
+                    colorGrade = lumetriPresets[1].grade
+                ),
+                TimelineClip(
+                    trackType = TrackType.GRAPHICS,
+                    title = "নথি হাইলাইট",
+                    startMs = 800L,
+                    durationMs = 5_500L,
+                    posY = 0.05f,
+                    inAnimationId = "in_cinema_reveal",
+                    lockedSfxId = "sfx_type_1",
+                    investigativeConfig = InvestigativeDocConfig(
+                        toolType = InvestigativeToolType.NEWSPAPER_LOUPE,
+                        headline = cleanTopic,
+                        bodyText = cleanNote
+                    )
+                ),
+                TimelineClip(
+                    trackType = TrackType.GRAPHICS,
+                    title = "তুলনামূলক ৬০-বার চার্ট",
+                    startMs = 6_600L,
+                    durationMs = 6_000L,
+                    inAnimationId = "in_slide_up",
+                    lockedSfxId = "sfx_whoosh_1",
+                    chartConfig = ComparisonChartConfig(
+                        title = "$cleanTopic · ডেটা তুলনা",
+                        barCount = 12,
+                        bars = generateDefaultBars(12)
+                    )
+                ),
+                TimelineClip(
+                    trackType = TrackType.GRAPHICS,
+                    title = "৩-স্লট শেপ কম্পারিজন",
+                    startMs = 12_800L,
+                    durationMs = 5_000L,
+                    inAnimationId = "in_zoom_pop",
+                    comparisonGrid = buildDefaultComparisonGrid(3)
+                ),
+                TimelineClip(
+                    trackType = TrackType.TEXT,
+                    title = "কারাওকে ন্যারেশন",
+                    startMs = 500L,
+                    durationMs = 17_000L,
+                    posY = 0.34f,
+                    textConfig = TextLayerConfig(
+                        text = "$cleanTopic — $cleanNote",
+                        subtitle = "অনুসন্ধানী প্রতিবেদন · ChitraFlow Pro",
+                        fontId = StudioFontOption.HIND_SILIGURI.id,
+                        fontSizeSp = 19f,
+                        karaokeHighlight = true,
+                        backgroundPill = true,
+                        accentColorHex = 0xFFFFB300
+                    )
+                ),
+                TimelineClip(
+                    trackType = TrackType.VOICEOVER,
+                    title = "মূল ভয়েসওভার (অটো-ডাক ট্রিগার)",
+                    startMs = 1_500L,
+                    durationMs = 10_000L,
+                    audioConfig = AudioConfig(volume = 1.2f, noiseReductionEnabled = true, waveformSeed = 19)
+                ),
+                TimelineClip(
+                    trackType = TrackType.MUSIC,
+                    title = "সিনেমা সাসপেন্স BGM",
+                    startMs = 0L,
+                    durationMs = 18_000L,
+                    audioConfig = AudioConfig(volume = 0.85f, autoDuckingEnabled = true, duckingFloor = 0.22f, waveformSeed = 42)
+                )
+            )
+        )
+    }
+
     data class StudioTemplate(
         val id: String,
         val titleBn: String,
@@ -192,103 +575,19 @@ object PresetCatalog {
 
     val studioTemplates: List<StudioTemplate> = listOf(
         StudioTemplate(
-            id = "tpl_history_doc",
-            titleBn = "ইতিহাস ও ডকুমেন্টারি",
-            titleEn = "History Documentary",
-            subtitleBn = "সাল কার্ড + লোয়ার থার্ড + লুমেট্রি গ্রেড",
+            id = "tpl_investigative_pro",
+            titleBn = "অনুসন্ধানী ডকুমেন্টারি প্রো",
+            titleEn = "Investigative Documentary Pro",
+            subtitleBn = "ম্যাপ + নথি লুপ + চার্ট + অটো-ডাকিং",
             aspectRatio = AspectRatioPreset.LANDSCAPE_16_9,
             thumbnailDrawable = "img_tpl_documentary",
-            buildProject = {
-                StudioProject(
-                    name = "বাংলার নদী ও ঐতিহ্য",
-                    aspectRatio = AspectRatioPreset.LANDSCAPE_16_9,
-                    previewResolution = PreviewResolution.P1080,
-                    thumbnailDrawable = "img_tpl_documentary",
-                    totalDurationMs = 14_000L,
-                    clips = listOf(
-                        TimelineClip(
-                            trackType = TrackType.VIDEO,
-                            title = "River Golden Hour",
-                            startMs = 0L,
-                            durationMs = 14_000L,
-                            loopAnimationId = "loop_zoom_creep",
-                            speedRamp = speedRampPresets[4],
-                            mediaSource = MediaSource(drawableName = "img_tpl_documentary", label = "Golden River Footage")
-                        ),
-                        TimelineClip(
-                            trackType = TrackType.ADJUSTMENT,
-                            title = "Teal & Amber Grade",
-                            startMs = 0L,
-                            durationMs = 14_000L,
-                            colorGrade = lumetriPresets[1].grade
-                        ),
-                        TimelineClip(
-                            trackType = TrackType.GRAPHICS,
-                            title = "ঐতিহাসিক সাল কার্ড",
-                            startMs = 600L,
-                            durationMs = 5_500L,
-                            posX = -0.18f,
-                            posY = 0.26f,
-                            inAnimationId = "in_slide_left",
-                            outAnimationId = "out_fade",
-                            lockedSfxId = "sfx_whoosh_1",
-                            keyframes = listOf(
-                                Keyframe(timeOffsetMs = 0L, posX = -0.32f, posY = 0.26f, opacity = 0.2f),
-                                Keyframe(timeOffsetMs = 1000L, posX = -0.14f, posY = 0.26f, opacity = 1f),
-                                Keyframe(timeOffsetMs = 4500L, posX = -0.14f, posY = 0.26f, opacity = 1f)
-                            ),
-                            textConfig = TextLayerConfig(
-                                text = "১৭৫৭ · পলাশী প্রান্তর",
-                                subtitle = "ঐতিহাসিক প্রামাণ্যচিত্র · আর্কাইভ",
-                                fontId = StudioFontOption.NOTO_SERIF_BENGALI.id,
-                                fontSizeSp = 22f,
-                                accentColorHex = 0xFFFFB300,
-                                lowerThirdTemplate = LowerThirdTemplate.DOCUMENTARY_DATE_CARD
-                            )
-                        ),
-                        TimelineClip(
-                            trackType = TrackType.TEXT,
-                            title = "কারাওকে সাবটাইটেল",
-                            startMs = 3_500L,
-                            durationMs = 8_500L,
-                            posX = 0f,
-                            posY = -0.25f,
-                            inAnimationId = "in_fade",
-                            outAnimationId = "out_fade",
-                            textConfig = TextLayerConfig(
-                                text = "শতাব্দীর স্রোতে ভেসে চলা বাংলার অজানা ইতিহাস ও লোকগাথা",
-                                subtitle = "",
-                                fontId = StudioFontOption.HIND_SILIGURI.id,
-                                fontSizeSp = 20f,
-                                karaokeHighlight = true,
-                                backgroundPill = true,
-                                accentColorHex = 0xFF00E5FF
-                            )
-                        ),
-                        TimelineClip(
-                            trackType = TrackType.VOICEOVER,
-                            title = "নদীমাতৃক ভয়েসওভার",
-                            startMs = 2_000L,
-                            durationMs = 6_500L,
-                            lockedSfxId = "sfx_cinema_0",
-                            audioConfig = AudioConfig(volume = 1.2f, noiseReductionEnabled = true, waveformSeed = 11)
-                        ),
-                        TimelineClip(
-                            trackType = TrackType.MUSIC,
-                            title = "Ambient Documentary Bed",
-                            startMs = 0L,
-                            durationMs = 14_000L,
-                            audioConfig = AudioConfig(volume = 0.78f, autoDuckingEnabled = true, duckingFloor = 0.22f, waveformSeed = 23)
-                        )
-                    )
-                )
-            }
+            buildProject = { buildAutoInvestigativeDocumentary("বাংলার অজানা ইতিহাস", "ঐতিহাসিক আর্কাইভ ও নথি বিশ্লেষণ") }
         ),
         StudioTemplate(
             id = "tpl_motion_reel",
             titleBn = "মোশন গ্রাফিক্স রিল",
             titleEn = "Kinetic Motion Reel",
-            subtitleBn = "কি-ফ্রেম অ্যানিমেশন + স্পিড র‍্যাম্প + SFX",
+            subtitleBn = "কি-ফ্রেম + হলিউড VFX + স্পিড র‍্যাম্প",
             aspectRatio = AspectRatioPreset.PORTRAIT_9_16,
             thumbnailDrawable = "img_tpl_motion",
             buildProject = {
@@ -309,6 +608,13 @@ object PresetCatalog {
                             mediaSource = MediaSource(drawableName = "img_tpl_motion", label = "Kinetic Glass")
                         ),
                         TimelineClip(
+                            trackType = TrackType.VFX,
+                            title = "Anamorphic Flare",
+                            startMs = 0L,
+                            durationMs = 12_000L,
+                            vfxConfig = VfxConfig(VfxEffectType.ANAMORPHIC_FLARE, 0.7f, 1f)
+                        ),
+                        TimelineClip(
                             trackType = TrackType.ADJUSTMENT,
                             title = "Cyber Neon Glow",
                             startMs = 0L,
@@ -326,14 +632,9 @@ object PresetCatalog {
                             outAnimationId = "out_whip_away",
                             loopAnimationId = "loop_float",
                             lockedSfxId = "sfx_impact_0",
-                            keyframes = listOf(
-                                Keyframe(timeOffsetMs = 0L, posX = 0f, posY = 0.15f, scale = 0.7f, opacity = 0.2f),
-                                Keyframe(timeOffsetMs = 1200L, posX = 0f, posY = -0.06f, scale = 1.15f, opacity = 1f),
-                                Keyframe(timeOffsetMs = 4500L, posX = 0f, posY = -0.06f, scale = 1.0f, opacity = 1f)
-                            ),
                             textConfig = TextLayerConfig(
-                                text = "চিত্রফ্লো মোশন স্টুডিও",
-                                subtitle = "4K 60FPS · KEYFRAME ENGINE",
+                                text = "চিত্রফ্লো মাস্টার প্রো",
+                                subtitle = "HOLLYWOOD VFX · 60 BAR CHART",
                                 fontId = StudioFontOption.HIND_SILIGURI.id,
                                 fontSizeSp = 28f,
                                 karaokeHighlight = true,
@@ -356,7 +657,7 @@ object PresetCatalog {
             id = "tpl_street_cinema",
             titleBn = "নাইট স্ট্রিট ন্যারেটিভ",
             titleEn = "Street Cinema Story",
-            subtitleBn = "রেডিয়াল মাস্ক + RGB কার্ভ + অটো-ডাকিং",
+            subtitleBn = "৩-স্লট কম্পারিজন + অটো-ডাকিং",
             aspectRatio = AspectRatioPreset.PORTRAIT_9_16,
             thumbnailDrawable = "img_tpl_street_cinema",
             buildProject = {
@@ -372,33 +673,26 @@ object PresetCatalog {
                             title = "Rainy Street Walk",
                             startMs = 0L,
                             durationMs = 15_000L,
-                            maskConfig = MaskConfig(shape = MaskShape.CINEMA_BARS, feather = 0.1f, scale = 0.82f),
                             mediaSource = MediaSource(drawableName = "img_tpl_street_cinema", label = "Rain Street Cinema")
                         ),
                         TimelineClip(
-                            trackType = TrackType.ADJUSTMENT,
-                            title = "35mm Vintage Curve",
+                            trackType = TrackType.VFX,
+                            title = "Cinema Rain",
                             startMs = 0L,
                             durationMs = 15_000L,
-                            colorGrade = lumetriPresets[4].grade
+                            vfxConfig = VfxConfig(VfxEffectType.CINEMA_RAIN, 0.75f, 1.2f)
                         ),
                         TimelineClip(
                             trackType = TrackType.GRAPHICS,
-                            title = "লোকেশন লোয়ার থার্ড",
+                            title = "লোকেশন ম্যাপ রুট",
                             startMs = 1_200L,
                             durationMs = 6_000L,
-                            posX = -0.1f,
-                            posY = 0.28f,
                             inAnimationId = "in_cinema_reveal",
-                            outAnimationId = "out_slide_left",
-                            lockedSfxId = "sfx_pop_5",
-                            textConfig = TextLayerConfig(
-                                text = "ঢাকা · রাত ১১:৪৫",
-                                subtitle = "বৃষ্টির শহর · স্ট্রিট ডকুমেন্টারি",
-                                fontId = StudioFontOption.NOTO_SANS_BENGALI.id,
-                                fontSizeSp = 21f,
-                                accentColorHex = 0xFFFF4D6D,
-                                lowerThirdTemplate = LowerThirdTemplate.NEWS_LOWER_THIRD
+                            investigativeConfig = InvestigativeDocConfig(
+                                toolType = InvestigativeToolType.MAP_RADAR_ROUTE,
+                                headline = "রাত ১১:৪৫ · ঢাকা",
+                                pointALabel = "শাহবাগ",
+                                pointBLabel = "সদরঘাট"
                             )
                         ),
                         TimelineClip(
