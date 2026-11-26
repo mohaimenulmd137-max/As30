@@ -1,0 +1,6 @@
+{
+  "name": "ChitraFlow Studio",
+  "description": "Pro-grade mobile motion graphics and documentary video editing studio with multi-track timeline, keyframes, Lumetri color grading, audio auto-ducking, and cloud drafts.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

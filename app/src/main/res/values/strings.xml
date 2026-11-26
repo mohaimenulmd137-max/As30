@@ -1,0 +1,16 @@
+<resources>
+    <string name="app_name">ChitraFlow Studio</string>
+    <string name="hub_subtitle">Pro Motion Graphics &amp; Documentary Studio</string>
+    <string name="new_blank_project">New Blank Project</string>
+    <string name="templates_section">Documentary &amp; Motion Templates</string>
+    <string name="drafts_section">Saved Local Drafts</string>
+    <string name="export_video">Export</string>
+    <string name="auto_save_active">Auto-Save Ready</string>
+    <string name="undo_action">Undo</string>
+    <string name="redo_action">Redo</string>
+    <string name="play_action">Play</string>
+    <string name="pause_action">Pause</string>
+    <string name="add_keyframe">Add Keyframe</string>
+    <string name="record_voiceover">Record Voiceover</string>
+    <string name="stop_recording">Stop Recording</string>
+</resources>
