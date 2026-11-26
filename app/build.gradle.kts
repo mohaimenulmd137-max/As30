@@ -63,7 +63,21 @@ android {
     compose = true
     buildConfig = true
   }
-  testOptions { unitTests { isIncludeAndroidResources = true } }
+  testOptions {
+    unitTests {
+      isIncludeAndroidResources = true
+      all { test ->
+        val preCachedRobolectricDir = file("/home/appuser/.m2/repository/org/robolectric/android-all-instrumented/16-robolectric-13921718-i7")
+        if (preCachedRobolectricDir.exists()) {
+          test.systemProperty("robolectric.offline", "true")
+          test.systemProperty("robolectric.dependency.dir", preCachedRobolectricDir.absolutePath)
+        } else {
+          test.systemProperty("robolectric.dependency.repo.url", "https://maven-central.storage-download.googleapis.com/maven2/")
+          test.systemProperty("robolectric.dependency.repo.id", "google-maven-central-mirror")
+        }
+      }
+    }
+  }
   dependenciesInfo {
     includeInApk = false
     includeInBundle = true
