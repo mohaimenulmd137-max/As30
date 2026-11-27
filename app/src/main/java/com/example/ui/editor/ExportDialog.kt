@@ -1,5 +1,6 @@
 package com.example.ui.editor
 
+import android.content.Intent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -11,9 +12,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.MovieCreation
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -22,6 +26,7 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -32,6 +37,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -50,13 +56,17 @@ import com.example.ui.theme.TextSecondary
 @Composable
 fun ExportDialog(
     initialResolution: PreviewResolution,
+    totalDurationMs: Long = 8_000L,
     exportState: ExportUiState,
     isBangla: Boolean,
-    onStartExport: (PreviewResolution, ExportFps) -> Unit,
+    onStartExport: (PreviewResolution, ExportFps, Boolean) -> Unit,
+    onCancelExport: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    val context = LocalContext.current
     var selectedRes by remember(initialResolution) { mutableStateOf(initialResolution) }
     var selectedFps by remember { mutableStateOf(ExportFps.FPS30) }
+    var fastMode by remember { mutableStateOf(true) }
 
     AlertDialog(
         onDismissRequest = { if (exportState !is ExportUiState.Exporting) onDismiss() },
@@ -66,7 +76,7 @@ fun ExportDialog(
                 Icon(Icons.Default.MovieCreation, contentDescription = null, tint = CyanPlayhead)
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = if (isBangla) "হাই-রেজুলেশন এক্সপোর্ট (MP4)" else "Pro Hardware Export (MP4)",
+                    text = if (isBangla) "হাই-স্পিড এক্সপোর্ট (MP4)" else "Pro Hardware Export (MP4)",
                     style = MaterialTheme.typography.titleMedium,
                     color = TextPrimary
                 )
@@ -75,7 +85,45 @@ fun ExportDialog(
         text = {
             when (exportState) {
                 is ExportUiState.Idle -> {
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(
+                            text = if (isBangla) "রেন্ডার স্পিড মোড" else "Render Speed Mode",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = TextSecondary
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilterChip(
+                                selected = fastMode,
+                                onClick = { fastMode = true },
+                                leadingIcon = {
+                                    Icon(
+                                        Icons.Default.Bolt,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                },
+                                label = { Text(if (isBangla) "দ্রুত টার্বো (Fast)" else "Fast Turbo") },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = EmeraldAudio,
+                                    selectedLabelColor = StudioObsidian,
+                                    selectedLeadingIconColor = StudioObsidian,
+                                    labelColor = TextSecondary
+                                ),
+                                modifier = Modifier.testTag("export_mode_turbo")
+                            )
+                            FilterChip(
+                                selected = !fastMode,
+                                onClick = { fastMode = false },
+                                label = { Text(if (isBangla) "সিনেমা স্মুথ (HQ)" else "Cinema Smooth") },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = AmberDocumentary,
+                                    selectedLabelColor = StudioObsidian,
+                                    labelColor = TextSecondary
+                                ),
+                                modifier = Modifier.testTag("export_mode_hq")
+                            )
+                        }
+
                         Text(
                             text = if (isBangla) "রেজুলেশন সিলেক্ট করুন" else "Resolution",
                             style = MaterialTheme.typography.labelMedium,
@@ -123,16 +171,24 @@ fun ExportDialog(
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Column(modifier = Modifier.padding(12.dp)) {
+                                val sec = (totalDurationMs / 1000f)
                                 val bitrateLabel = when (selectedRes) {
-                                    PreviewResolution.P720 -> "6 Mbps · H.264 Hardware"
-                                    PreviewResolution.P1080 -> "12 Mbps · Full HD Studio"
-                                    PreviewResolution.UHD4K -> "24 Mbps · Ultra HD Master"
+                                    PreviewResolution.P720 -> if (fastMode) "5 Mbps · Turbo 720p" else "6.5 Mbps · HD Studio"
+                                    PreviewResolution.P1080 -> if (fastMode) "9.5 Mbps · Turbo Full HD" else "12.5 Mbps · Full HD Master"
+                                    PreviewResolution.UHD4K -> if (fastMode) "18 Mbps · Fast Ultra HD" else "24 Mbps · Ultra HD Master"
                                 }
-                                Text(text = bitrateLabel, style = MaterialTheme.typography.labelMedium, color = CyanPlayhead)
+                                Text(
+                                    text = "$bitrateLabel · ${"%.1f".format(sec)}s",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = CyanPlayhead
+                                )
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
-                                    text = if (isBangla) "এক্সপোর্ট শেষে সরাসরি ফোন গ্যালারিতে (Movies/ChitraFlow Studio) সেভ হবে।"
-                                    else "Renders via MediaCodec and saves directly to Gallery (Movies/ChitraFlow Studio).",
+                                    text = if (isBangla) {
+                                        "এক্সপোর্ট শেষে স্বয়ংক্রিয়ভাবে ফোনের গ্যালারিতে (Movies/ChitraFlow Studio) সেভ হবে।"
+                                    } else {
+                                        "Renders via hardware MediaCodec and saves straight to Gallery (Movies/ChitraFlow Studio)."
+                                    },
                                     style = MaterialTheme.typography.bodySmall,
                                     color = TextSecondary
                                 )
@@ -195,6 +251,47 @@ fun ExportDialog(
                                 style = MaterialTheme.typography.labelMedium,
                                 color = EmeraldAudio
                             )
+                            val uri = res.outputUri
+                            if (uri != null) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    OutlinedButton(
+                                        onClick = {
+                                            runCatching {
+                                                val viewIntent = Intent(Intent.ACTION_VIEW).apply {
+                                                    setDataAndType(uri, "video/mp4")
+                                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                                }
+                                                context.startActivity(Intent.createChooser(viewIntent, if (isBangla) "ভিডিও প্লে করুন" else "Play Video"))
+                                            }
+                                        },
+                                        modifier = Modifier.weight(1f).testTag("open_exported_video_btn")
+                                    ) {
+                                        Icon(Icons.Default.PlayArrow, null, tint = CyanPlayhead, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(if (isBangla) "দেখুন" else "Watch", color = CyanPlayhead)
+                                    }
+                                    OutlinedButton(
+                                        onClick = {
+                                            runCatching {
+                                                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                                    type = "video/mp4"
+                                                    putExtra(Intent.EXTRA_STREAM, uri)
+                                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                                }
+                                                context.startActivity(Intent.createChooser(shareIntent, if (isBangla) "ভিডিও শেয়ার করুন" else "Share Video"))
+                                            }
+                                        },
+                                        modifier = Modifier.weight(1f).testTag("share_exported_video_btn")
+                                    ) {
+                                        Icon(Icons.Default.Share, null, tint = AmberDocumentary, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(if (isBangla) "শেয়ার" else "Share", color = AmberDocumentary)
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -204,14 +301,21 @@ fun ExportDialog(
             when (exportState) {
                 is ExportUiState.Idle -> {
                     Button(
-                        onClick = { onStartExport(selectedRes, selectedFps) },
+                        onClick = { onStartExport(selectedRes, selectedFps, fastMode) },
                         colors = ButtonDefaults.buttonColors(containerColor = CyanPlayhead, contentColor = StudioObsidian),
                         modifier = Modifier.testTag("start_export_button")
                     ) {
                         Text(if (isBangla) "রেন্ডার শুরু করুন" else "Render Video", fontWeight = FontWeight.Bold)
                     }
                 }
-                is ExportUiState.Exporting -> Unit
+                is ExportUiState.Exporting -> {
+                    TextButton(
+                        onClick = onCancelExport,
+                        modifier = Modifier.testTag("cancel_export_button")
+                    ) {
+                        Text(if (isBangla) "রেন্ডার বাতিল" else "Cancel Render", color = CoralAction)
+                    }
+                }
                 is ExportUiState.Completed -> {
                     Button(
                         onClick = onDismiss,

@@ -27,6 +27,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.ContentCopy
@@ -100,6 +101,7 @@ fun ProjectHubScreen(
 
     var showNewProjectDialog by remember { mutableStateOf(false) }
     var showAutoDocDialog by remember { mutableStateOf(false) }
+    var showGuideDialog by remember { mutableStateOf(false) }
     var renameTarget by remember { mutableStateOf<StudioProject?>(null) }
 
     val filteredProjects = remember(projects, searchQuery) {
@@ -128,6 +130,7 @@ fun ProjectHubScreen(
                     isBangla = isBangla,
                     projectCount = projects.size,
                     onToggleLanguage = { viewModel.toggleLanguage() },
+                    onOpenGuide = { showGuideDialog = true },
                     onNewBlankProject = { showNewProjectDialog = true },
                     onAutoDocumentary = { showAutoDocDialog = true }
                 )
@@ -328,6 +331,13 @@ fun ProjectHubScreen(
         )
     }
 
+    if (showGuideDialog) {
+        com.example.ui.editor.StudioGuideDialog(
+            isBangla = isBangla,
+            onDismiss = { showGuideDialog = false }
+        )
+    }
+
     renameTarget?.let { target ->
         RenameProjectDialog(
             currentName = target.name,
@@ -346,6 +356,7 @@ private fun StudioHeroHeader(
     isBangla: Boolean,
     projectCount: Int,
     onToggleLanguage: () -> Unit,
+    onOpenGuide: () -> Unit,
     onNewBlankProject: () -> Unit,
     onAutoDocumentary: () -> Unit
 ) {
@@ -420,29 +431,57 @@ private fun StudioHeroHeader(
                     }
                 }
 
-                Surface(
-                    onClick = onToggleLanguage,
-                    color = StudioSurfaceElevated.copy(alpha = 0.9f),
-                    shape = RoundedCornerShape(12.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, StudioBorder),
-                    modifier = Modifier.testTag("language_toggle_button")
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Surface(
+                        onClick = onOpenGuide,
+                        color = StudioSurfaceElevated.copy(alpha = 0.9f),
+                        shape = RoundedCornerShape(12.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, StudioBorder),
+                        modifier = Modifier.testTag("hub_guide_button")
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Translate,
-                            contentDescription = "Toggle Language",
-                            tint = CyanPlayhead,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(5.dp))
-                        Text(
-                            text = if (isBangla) "বাংলা" else "EN",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = TextPrimary
-                        )
+                        Row(
+                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.HelpOutline,
+                                contentDescription = "User Guide",
+                                tint = AmberDocumentary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = if (isBangla) "গাইড" else "Guide",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = TextPrimary
+                            )
+                        }
+                    }
+
+                    Surface(
+                        onClick = onToggleLanguage,
+                        color = StudioSurfaceElevated.copy(alpha = 0.9f),
+                        shape = RoundedCornerShape(12.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, StudioBorder),
+                        modifier = Modifier.testTag("language_toggle_button")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Translate,
+                                contentDescription = "Toggle Language",
+                                tint = CyanPlayhead,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text(
+                                text = if (isBangla) "বাংলা" else "EN",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = TextPrimary
+                            )
+                        }
                     }
                 }
             }

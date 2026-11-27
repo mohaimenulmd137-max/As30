@@ -1,6 +1,7 @@
 package com.example.ui.editor
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import androidx.activity.compose.BackHandler
@@ -29,6 +30,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
@@ -39,7 +41,6 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.GridOn
-import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Mic
@@ -126,6 +127,9 @@ fun EditorScreen(
     val canRedo by viewModel.canRedo.collectAsStateWithLifecycle()
     val isBangla by viewModel.isBanglaUi.collectAsStateWithLifecycle()
     val exportState by viewModel.exportState.collectAsStateWithLifecycle()
+    val userAnimationPresets by viewModel.userAnimationPresets.collectAsStateWithLifecycle()
+    val beforeAfterBypassAnim by viewModel.beforeAfterBypassAnim.collectAsStateWithLifecycle()
+    val copiedKeyframe by viewModel.copiedKeyframe.collectAsStateWithLifecycle()
 
     var showExportDialog by remember { mutableStateOf(false) }
     var showMediaMenu by remember { mutableStateOf(false) }
@@ -133,9 +137,15 @@ fun EditorScreen(
     var showAutoDocDialog by remember { mutableStateOf(false) }
     var showFullscreenPreview by remember { mutableStateOf(false) }
     var showRenameDialog by remember { mutableStateOf(false) }
+    var showFloatingAnimEditor by remember { mutableStateOf(false) }
+    var isFloatingAnimMinimized by remember { mutableStateOf(false) }
     var activeToolSection by remember { mutableStateOf<ProToolSection?>(null) }
-    var pendingSlotTarget by remember { mutableStateOf<Pair<String, String>?>(null) }
     var pendingFontClipId by remember { mutableStateOf<String?>(null) }
+    var showChartStudioDialog by remember { mutableStateOf(false) }
+    var showMapStudioDialog by remember { mutableStateOf(false) }
+    var showGuideDialog by remember { mutableStateOf(false) }
+    var chartStudioClipId by remember { mutableStateOf<String?>(null) }
+    var mapStudioClipId by remember { mutableStateOf<String?>(null) }
 
     val context = LocalContext.current
 
@@ -143,6 +153,9 @@ fun EditorScreen(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri: Uri? ->
         if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
             val mime = context.contentResolver.getType(uri) ?: ""
             val isVideo = mime.startsWith("video/")
             viewModel.addMediaClip(uri, isVideo, if (isVideo) "ভিডিও ক্লিপ" else "ছবি ক্লিপ")
@@ -153,19 +166,10 @@ fun EditorScreen(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri: Uri? ->
         if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
             viewModel.addGraphicOverlayUri(uri, "গ্রাফিক ওভারলে")
-        }
-    }
-
-    val comparisonSlotPickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.PickVisualMedia()
-    ) { uri: Uri? ->
-        val target = pendingSlotTarget
-        pendingSlotTarget = null
-        if (uri != null && target != null) {
-            val mime = context.contentResolver.getType(uri) ?: ""
-            val isVideo = mime.startsWith("video/")
-            viewModel.updateComparisonSlotMedia(target.first, target.second, uri, isVideo, "স্লট মিডিয়া")
         }
     }
 
@@ -173,6 +177,9 @@ fun EditorScreen(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
             viewModel.addAudioClip(uri, "ব্যাকগ্রাউন্ড মিউজিক", isVoiceover = false)
         }
     }
@@ -214,13 +221,14 @@ fun EditorScreen(
         currentProject.clips.firstOrNull { it.id == selectedClipId }
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color(0xFF07090F))
-            .statusBarsPadding()
-            .navigationBarsPadding()
-    ) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xFF07090F))
+                .statusBarsPadding()
+                .navigationBarsPadding()
+        ) {
         // 1. TOP STUDIO BAR: ← | Title | Undo | Redo | Speed | 1080p v | Tune | এক্সপোর্ট
         Row(
             modifier = Modifier
@@ -328,6 +336,19 @@ fun EditorScreen(
                     }
                 }
 
+                // Guide / Help button
+                Surface(
+                    onClick = { showGuideDialog = true },
+                    color = Color(0xFF131926),
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, StudioBorder),
+                    modifier = Modifier.size(34.dp).testTag("editor_guide_button")
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(Icons.AutoMirrored.Filled.HelpOutline, contentDescription = "Guide", tint = CyanPlayhead, modifier = Modifier.size(17.dp))
+                    }
+                }
+
                 // Bright Amber Export Button
                 Button(
                     onClick = { showExportDialog = true },
@@ -384,21 +405,36 @@ fun EditorScreen(
                         }
                     )
                     DropdownMenuItem(
-                        text = { Text(if (isBangla) "৬০-বার তুলনামূলক চার্ট" else "60-Bar Comparison Chart", color = CyanPlayhead) },
+                        text = { Text(if (isBangla) "📊 প্রো চার্ট ও গ্রাফ স্টুডিও (০ থেকে)" else "Pro Chart & Graph Studio", color = CyanPlayhead, fontWeight = FontWeight.SemiBold) },
                         leadingIcon = { Icon(Icons.Default.BarChart, null, tint = CyanPlayhead) },
                         onClick = {
                             showMediaMenu = false
-                            viewModel.addComparisonChartClip(12)
+                            viewModel.ensureChartClipForStudio()?.let {
+                                chartStudioClipId = it.id
+                                showChartStudioDialog = true
+                            }
                             activeToolSection = ProToolSection.OVERLAY_PRO
                         }
                     )
                     DropdownMenuItem(
-                        text = { Text(if (isBangla) "৩/৪ ছবি জ্যামিতিক কম্পারিজন" else "Geometric Media Comparison", color = AmberDocumentary) },
-                        leadingIcon = { Icon(Icons.Default.GridView, null, tint = AmberDocumentary) },
+                        text = { Text(if (isBangla) "🗺️ ম্যাপ রাডার স্টুডিও" else "Map Radar Studio", color = EmeraldAudio, fontWeight = FontWeight.SemiBold) },
+                        leadingIcon = { Icon(Icons.Default.Search, null, tint = EmeraldAudio) },
                         onClick = {
                             showMediaMenu = false
-                            viewModel.addComparisonGridClip(3)
+                            viewModel.ensureMapClipForStudio()?.let {
+                                mapStudioClipId = it.id
+                                showMapStudioDialog = true
+                            }
                             activeToolSection = ProToolSection.OVERLAY_PRO
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text(if (isBangla) "হলিউড VFX লেয়ার ✨" else "Hollywood VFX Layer ✨", color = Color(0xFF2DD4BF)) },
+                        leadingIcon = { Icon(Icons.Default.AutoAwesome, null, tint = Color(0xFF2DD4BF)) },
+                        onClick = {
+                            showMediaMenu = false
+                            viewModel.addVfxClip(VfxEffectType.VOLUMETRIC_GOD_RAYS)
+                            activeToolSection = ProToolSection.VFX
                         }
                     )
                     DropdownMenuItem(
@@ -563,6 +599,18 @@ fun EditorScreen(
                 }
             }
 
+            StatusTogglePill(
+                icon = Icons.Default.AutoAwesome,
+                label = "VFX",
+                active = activeToolSection == ProToolSection.VFX,
+                activeContainer = Color(0xFF0E2630),
+                activeBorder = CyanPlayhead.copy(alpha = 0.65f),
+                activeContent = CyanPlayhead,
+                onClick = {
+                    activeToolSection = if (activeToolSection == ProToolSection.VFX) null else ProToolSection.VFX
+                }
+            )
+
             // Master Volume & Auto-Ducking Pill Slider
             Surface(
                 color = Color(0xFF131926),
@@ -597,6 +645,8 @@ fun EditorScreen(
             project = currentProject,
             playheadMs = playheadMs,
             selectedClipId = selectedClipId,
+            isPlaying = isPlaying,
+            bypassAnimationPreview = beforeAfterBypassAnim,
             onSelectClip = { viewModel.selectClip(it) },
             onDirectGesture = { id, dx, dy, scale, rot ->
                 viewModel.updateDirectCanvasGesture(id, dx, dy, scale, rot)
@@ -712,19 +762,36 @@ fun EditorScreen(
                 ExpandableInspectorSheet(
                     section = section,
                     selectedClip = selectedClip,
+                    allClips = currentProject.clips,
                     playheadMs = playheadMs,
                     isBangla = isBangla,
                     voiceoverRecorder = viewModel.voiceoverRecorder,
                     onUpdateClip = { id, fn -> viewModel.updateClip(id, transform = fn) },
+                    onSelectAudioTarget = { id -> viewModel.selectClip(id) },
+                    onOpenFloatingAnimEditor = {
+                        showFloatingAnimEditor = true
+                        isFloatingAnimMinimized = false
+                    },
                     onAddKeyframe = { id -> viewModel.addKeyframeAtPlayhead(id) },
                     onSeek = { viewModel.seekTo(it) },
                     onAddVfxClip = { eff -> viewModel.addVfxClip(eff) },
+                    onApplyTransitionToAll = { trIn, inDur, trOut, outDur ->
+                        viewModel.applyTransitionToAllClips(trIn, inDur, trOut, outDur)
+                    },
+                    onSwitchSection = { next -> activeToolSection = next },
                     onAddChart = { cnt -> viewModel.addComparisonChartClip(cnt) },
-                    onAddComparisonGrid = { slots -> viewModel.addComparisonGridClip(slots) },
                     onAddInvestigativeTool = { t -> viewModel.addInvestigativeClip(t) },
-                    onPickSlotMedia = { cId, sId ->
-                        pendingSlotTarget = cId to sId
-                        comparisonSlotPickerLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
+                    onOpenChartStudio = {
+                        viewModel.ensureChartClipForStudio()?.let {
+                            chartStudioClipId = it.id
+                            showChartStudioDialog = true
+                        }
+                    },
+                    onOpenMapStudio = {
+                        viewModel.ensureMapClipForStudio()?.let {
+                            mapStudioClipId = it.id
+                            showMapStudioDialog = true
+                        }
                     },
                     onPickAudioFile = { audioPickerLauncher.launch(arrayOf("audio/*")) },
                     onImportCustomFont = { clipId ->
@@ -749,6 +816,9 @@ fun EditorScreen(
             onSelectClip = { viewModel.selectClip(it) },
             onMoveClip = { id, startMs -> viewModel.moveClipTime(id, startMs) },
             onTrimClip = { id, startMs, durMs -> viewModel.trimClip(id, startMs, durMs) },
+            onMoveClipLane = { id, delta -> viewModel.moveClipLane(id, delta) },
+            onDuplicateSequentially = { id -> viewModel.duplicateClipSequentially(id) },
+            onDuplicateToSubLayer = { id -> viewModel.duplicateClipToSubLayer(id) },
             onMoveTrackOrder = { type, delta -> viewModel.moveTrackOrder(type, delta) },
             onToggleTrackVisibility = { type -> viewModel.toggleTrackVisibility(type) },
             onToggleTrackLock = { type -> viewModel.toggleTrackLock(type) },
@@ -759,12 +829,12 @@ fun EditorScreen(
                         activeToolSection = ProToolSection.TEXT_FONT
                     }
                     TrackType.GRAPHICS -> {
-                        viewModel.addComparisonChartClip(12)
+                        viewModel.addComparisonChartClip(0)
                         activeToolSection = ProToolSection.OVERLAY_PRO
                     }
                     TrackType.VFX -> {
                         viewModel.addVfxClip(VfxEffectType.ANAMORPHIC_FLARE)
-                        activeToolSection = ProToolSection.TRANSITION_VFX
+                        activeToolSection = ProToolSection.VFX
                     }
                     TrackType.ADJUSTMENT -> {
                         viewModel.addAdjustmentLayer()
@@ -804,18 +874,58 @@ fun EditorScreen(
             },
             onQuickAddText = { viewModel.addTextClip(LowerThirdTemplate.NONE) }
         )
+        }
+
+        if (showFloatingAnimEditor && selectedClip != null) {
+            FloatingAnimationEditor(
+                clip = selectedClip,
+                playheadMs = playheadMs,
+                isPlaying = isPlaying,
+                bypassAnimationPreview = beforeAfterBypassAnim,
+                copiedKeyframe = copiedKeyframe,
+                userPresets = userAnimationPresets,
+                isBangla = isBangla,
+                minimized = isFloatingAnimMinimized,
+                onToggleMinimize = { isFloatingAnimMinimized = !isFloatingAnimMinimized },
+                onUpdateClip = { fn -> viewModel.updateClip(selectedClip.id, transform = fn) },
+                onSeek = { viewModel.seekTo(it) },
+                onTogglePlayPause = { viewModel.togglePlayback() },
+                onReplayAnimation = { durMs -> viewModel.replayClipAnimation(selectedClip.id, durMs) },
+                onToggleBeforeAfter = { viewModel.toggleBeforeAfterBypassAnim() },
+                onAddKeyframe = { viewModel.addKeyframeAtPlayhead(selectedClip.id) },
+                onDeleteKeyframe = { kfId -> viewModel.deleteKeyframe(selectedClip.id, kfId) },
+                onMoveKeyframe = { kfId, d -> viewModel.moveKeyframe(selectedClip.id, kfId, d) },
+                onCopyKeyframe = { kf -> viewModel.copyKeyframe(kf) },
+                onPasteKeyframe = { viewModel.pasteKeyframeAtPlayhead(selectedClip.id) },
+                onUpdateKeyframeEasing = { kfId, easing -> viewModel.updateKeyframeEasing(selectedClip.id, kfId, easing) },
+                onSaveUserPreset = { name, profile -> viewModel.saveUserAnimationPreset(name, profile) },
+                onRenameUserPreset = { id, newName -> viewModel.renameUserAnimationPreset(id, newName) },
+                onDeleteUserPreset = { id -> viewModel.deleteUserAnimationPreset(id) },
+                onApplyUserPreset = { preset -> viewModel.applyUserAnimationPreset(selectedClip.id, preset) },
+                onDismiss = { showFloatingAnimEditor = false }
+            )
+        }
     }
 
     if (showExportDialog || exportState !is ExportUiState.Idle) {
         ExportDialog(
             initialResolution = currentProject.previewResolution,
+            totalDurationMs = currentProject.totalDurationMs,
             exportState = exportState,
             isBangla = isBangla,
-            onStartExport = { res, fps -> viewModel.startExport(res, fps) },
+            onStartExport = { res, fps, fastMode -> viewModel.startExport(res, fps, fastMode) },
+            onCancelExport = { viewModel.cancelExport() },
             onDismiss = {
                 showExportDialog = false
                 viewModel.dismissExportDialog()
             }
+        )
+    }
+
+    if (showGuideDialog) {
+        StudioGuideDialog(
+            isBangla = isBangla,
+            onDismiss = { showGuideDialog = false }
         )
     }
 
@@ -826,6 +936,63 @@ fun EditorScreen(
             onGenerate = { topic, note ->
                 showAutoDocDialog = false
                 viewModel.generateAutoDocumentaryIntoCurrent(topic, note)
+            }
+        )
+    }
+
+    if (showChartStudioDialog) {
+        val targetClip = currentProject.clips.firstOrNull { it.id == (chartStudioClipId ?: selectedClipId) && it.chartConfig != null }
+            ?: currentProject.clips.firstOrNull { it.chartConfig != null }
+        val initialChart = targetClip?.chartConfig ?: com.example.domain.model.ComparisonChartConfig(
+            barCount = 0,
+            bars = emptyList()
+        )
+        ChartStudioDialog(
+            initialConfig = initialChart,
+            isBangla = isBangla,
+            onDismiss = { showChartStudioDialog = false },
+            onSave = { updatedChart ->
+                val clipId = targetClip?.id ?: viewModel.ensureChartClipForStudio()?.id
+                if (clipId != null) {
+                    viewModel.updateClip(clipId) {
+                        it.copy(
+                            title = updatedChart.title.take(22).ifBlank { "চার্ট (${updatedChart.barCount})" },
+                            chartConfig = updatedChart
+                        )
+                    }
+                }
+                showChartStudioDialog = false
+            }
+        )
+    }
+
+    if (showMapStudioDialog) {
+        val targetClip = currentProject.clips.firstOrNull {
+            it.id == (mapStudioClipId ?: selectedClipId) && it.investigativeConfig?.toolType == InvestigativeToolType.MAP_RADAR_ROUTE
+        } ?: currentProject.clips.firstOrNull {
+            it.investigativeConfig?.toolType == InvestigativeToolType.MAP_RADAR_ROUTE
+        }
+        val initialDoc = targetClip?.investigativeConfig ?: com.example.domain.model.InvestigativeDocConfig(
+            toolType = InvestigativeToolType.MAP_RADAR_ROUTE,
+            headline = "অপারেশন রুট ও রাডার ট্র্যাক",
+            pointALabel = "ঢাকা",
+            pointBLabel = "চট্টগ্রাম"
+        )
+        MapRadarStudioDialog(
+            initialConfig = initialDoc,
+            isBangla = isBangla,
+            onDismiss = { showMapStudioDialog = false },
+            onSave = { updatedDoc ->
+                val clipId = targetClip?.id ?: viewModel.ensureMapClipForStudio()?.id
+                if (clipId != null) {
+                    viewModel.updateClip(clipId) {
+                        it.copy(
+                            title = updatedDoc.headline.take(20).ifBlank { "ম্যাপ রাডার" },
+                            investigativeConfig = updatedDoc
+                        )
+                    }
+                }
+                showMapStudioDialog = false
             }
         )
     }
@@ -875,6 +1042,8 @@ fun EditorScreen(
                     project = currentProject,
                     playheadMs = playheadMs,
                     selectedClipId = null,
+                    isPlaying = isPlaying,
+                    bypassAnimationPreview = beforeAfterBypassAnim,
                     onSelectClip = {},
                     onDirectGesture = { _, _, _, _, _ -> },
                     modifier = Modifier.fillMaxSize().padding(bottom = 54.dp)
@@ -1013,7 +1182,7 @@ fun AutoDocumentaryBuilderDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
-                    text = if (isBangla) "টপিক ও স্ক্রিপ্ট লিখলেই ম্যাপ রাডার, নথি হাইলাইট, ৬০-বার চার্ট, ৩-স্লট কম্পারিজন ও অটো-ডাকিং মিউজিকসহ সম্পূর্ণ ডকুমেন্টারি টাইমলাইন তৈরি হয়ে যাবে।" else "Enter topic & notes to auto-assemble a full multi-track documentary.",
+                    text = if (isBangla) "টপিক ও স্ক্রিপ্ট লিখলেই ম্যাপ রাডার, নথি হাইলাইট, ৬০-বার চার্ট, জ্যামিতিক বর্ডার ফ্রেম ও অটো-ডাকিং মিউজিকসহ সম্পূর্ণ ডকুমেন্টারি টাইমলাইন তৈরি হয়ে যাবে।" else "Enter topic & notes to auto-assemble a full multi-track documentary.",
                     style = MaterialTheme.typography.bodySmall,
                     color = TextSecondary
                 )

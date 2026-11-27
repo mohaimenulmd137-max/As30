@@ -3,10 +3,12 @@ package com.example.data.local
 import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.example.domain.model.AspectRatioPreset
 import com.example.domain.model.PresetCatalog
 import com.example.domain.model.StudioProject
+import com.example.domain.model.UserAnimationPreset
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import java.util.UUID
@@ -15,13 +17,44 @@ private val Context.studioDataStore by preferencesDataStore(name = "chitraflow_p
 
 class StudioPreferences(private val context: Context) {
     private val keyBanglaUi = booleanPreferencesKey("is_bangla_ui")
+    private val keyUserAnimPresets = stringPreferencesKey("user_anim_presets_json")
 
     val isBanglaUi: Flow<Boolean> = context.studioDataStore.data.map { prefs ->
         prefs[keyBanglaUi] ?: true
     }
 
+    val userAnimationPresets: Flow<List<UserAnimationPreset>> = context.studioDataStore.data.map { prefs ->
+        val raw = prefs[keyUserAnimPresets].orEmpty()
+        ProjectSerializer.userPresetsFromJsonString(raw)
+    }
+
     suspend fun setBanglaUi(enabled: Boolean) {
         context.studioDataStore.edit { it[keyBanglaUi] = enabled }
+    }
+
+    suspend fun saveUserAnimationPreset(preset: UserAnimationPreset) {
+        context.studioDataStore.edit { prefs ->
+            val current = ProjectSerializer.userPresetsFromJsonString(prefs[keyUserAnimPresets].orEmpty())
+            val next = (listOf(preset) + current.filterNot { it.id == preset.id }).take(30)
+            prefs[keyUserAnimPresets] = ProjectSerializer.userPresetsToJsonString(next)
+        }
+    }
+
+    suspend fun renameUserAnimationPreset(presetId: String, newName: String) {
+        if (newName.isBlank()) return
+        context.studioDataStore.edit { prefs ->
+            val current = ProjectSerializer.userPresetsFromJsonString(prefs[keyUserAnimPresets].orEmpty())
+            val next = current.map { if (it.id == presetId) it.copy(name = newName.trim()) else it }
+            prefs[keyUserAnimPresets] = ProjectSerializer.userPresetsToJsonString(next)
+        }
+    }
+
+    suspend fun deleteUserAnimationPreset(presetId: String) {
+        context.studioDataStore.edit { prefs ->
+            val current = ProjectSerializer.userPresetsFromJsonString(prefs[keyUserAnimPresets].orEmpty())
+            val next = current.filterNot { it.id == presetId }
+            prefs[keyUserAnimPresets] = ProjectSerializer.userPresetsToJsonString(next)
+        }
     }
 }
 

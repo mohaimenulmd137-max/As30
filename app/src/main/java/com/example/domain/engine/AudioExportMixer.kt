@@ -33,12 +33,47 @@ object AudioExportMixer {
 
     const val SAMPLE_RATE = 44100
 
+    fun buildAudioFingerprint(project: StudioProject): String {
+        val sb = StringBuilder(256)
+        sb.append(project.totalDurationMs).append('|').append(project.masterVolume).append('|')
+        project.trackLayers.sortedBy { it.trackType.name }.forEach {
+            sb.append(it.trackType.name).append(':').append(it.isVisible).append(';')
+        }
+        project.clips.forEach { clip ->
+            val hasAudio = !clip.isHidden && (
+                clip.trackType == TrackType.VIDEO ||
+                    clip.trackType == TrackType.VOICEOVER ||
+                    clip.trackType == TrackType.MUSIC ||
+                    clip.lockedSfxId != null
+                )
+            if (hasAudio) {
+                sb.append(clip.id).append(',')
+                    .append(clip.trackType.name).append(',')
+                    .append(clip.startMs).append(',')
+                    .append(clip.durationMs).append(',')
+                    .append(clip.lockedSfxId ?: "").append(',')
+                    .append(clip.mediaSource?.uriString ?: "").append(',')
+                    .append(clip.audioConfig.audioPath ?: "").append(',')
+                    .append(clip.audioConfig.volume).append(',')
+                    .append(clip.audioConfig.isMuted).append(',')
+                    .append(clip.audioConfig.isSolo).append(',')
+                    .append(clip.audioConfig.autoDuckingEnabled).append(',')
+                    .append(clip.audioConfig.duckingFloor).append(',')
+                    .append(clip.audioConfig.fadeInMs).append(',')
+                    .append(clip.audioConfig.fadeOutMs).append(',')
+                    .append(clip.audioConfig.noiseReductionEnabled).append(',')
+                    .append(clip.audioConfig.waveformSeed).append(';')
+            }
+        }
+        return sb.toString()
+    }
+
     /**
      * Mixes Voiceover clips, Auto-Ducked Music clips, and Locked SFX across the project timeline
      * into a 44.1 kHz Mono 16-bit PCM array with smooth Auto-Ducking and soft limiting.
      */
     fun mixProjectAudioPcm(context: Context, project: StudioProject): ShortArray {
-        val totalDurationMs = project.totalDurationMs.coerceIn(1000L, 120_000L)
+        val totalDurationMs = project.totalDurationMs.coerceIn(1000L, 600_000L)
         val totalSamples = ((totalDurationMs * SAMPLE_RATE) / 1000L).toInt().coerceAtLeast(SAMPLE_RATE)
         val mixBuffer = FloatArray(totalSamples)
 
@@ -47,44 +82,61 @@ object AudioExportMixer {
             !clip.isHidden && (trackLayerMap[clip.trackType]?.isVisible != false)
         }
 
-        // 1. Mix Voiceover & Music tracks
-        activeClips.filter { it.trackType == TrackType.VOICEOVER || it.trackType == TrackType.MUSIC }
-            .forEach { clip ->
-                val clipSamplesCount = ((clip.durationMs * SAMPLE_RATE) / 1000L).toInt().coerceAtLeast(1)
-                val sourcePcm = decodeClipAudio(context, clip.audioConfig.audioPath, clipSamplesCount)
-                    ?: if (clip.trackType == TrackType.MUSIC) {
-                        generateAmbientCinemaPad(clipSamplesCount, clip.audioConfig.waveformSeed)
-                    } else {
-                        null
-                    }
+        // 1. Mix Embedded Video Audio + Voiceover + Music tracks
+        activeClips.filter {
+            it.trackType == TrackType.VIDEO || it.trackType == TrackType.VOICEOVER || it.trackType == TrackType.MUSIC
+        }.forEach { clip ->
+            val clipSamplesCount = ((clip.durationMs * SAMPLE_RATE) / 1000L).toInt().coerceAtLeast(1)
+            val resolvedAudioSource = clip.audioConfig.audioPath
+                ?: if (clip.trackType == TrackType.VIDEO && clip.mediaSource?.isVideo == true) clip.mediaSource.uriString else null
 
-                if (sourcePcm != null && sourcePcm.isNotEmpty()) {
-                    val startSample = ((clip.startMs * SAMPLE_RATE) / 1000L).toInt().coerceAtLeast(0)
-                    val endSample = min(totalSamples, startSample + clipSamplesCount)
-                    val blockSize = 256
-                    var idx = startSample
-                    while (idx < endSample) {
-                        val blockEnd = min(endSample, idx + blockSize)
-                        val tStartMs = (idx.toLong() * 1000L) / SAMPLE_RATE
-                        val tEndMs = (blockEnd.toLong() * 1000L) / SAMPLE_RATE
-                        val gainStart = AudioSynthEngine.computeEffectiveAudioGain(clip, project, tStartMs)
-                        val gainEnd = AudioSynthEngine.computeEffectiveAudioGain(clip, project, tEndMs)
-                        val blockSpan = (blockEnd - idx).coerceAtLeast(1)
+            val sourcePcm = decodeClipAudio(context, resolvedAudioSource, clipSamplesCount)
+                ?: if (clip.trackType == TrackType.MUSIC) {
+                    generateAmbientCinemaPad(clipSamplesCount, clip.audioConfig.waveformSeed)
+                } else {
+                    null
+                }
 
-                        for (s in idx until blockEnd) {
-                            val srcIdx = (s - startSample) % sourcePcm.size
-                            val frac = (s - idx).toFloat() / blockSpan
-                            val gain = gainStart + (gainEnd - gainStart) * frac
-                            val sampleNorm = sourcePcm[srcIdx] / 32767f
-                            mixBuffer[s] += sampleNorm * gain
+            if (sourcePcm != null && sourcePcm.isNotEmpty()) {
+                val startSample = ((clip.startMs * SAMPLE_RATE) / 1000L).toInt().coerceAtLeast(0)
+                val endSample = min(totalSamples, startSample + min(clipSamplesCount, sourcePcm.size.let {
+                    if (clip.trackType == TrackType.MUSIC) clipSamplesCount else maxOf(it, clipSamplesCount)
+                }))
+                val blockSize = 256
+                var idx = startSample
+                while (idx < endSample) {
+                    val blockEnd = min(endSample, idx + blockSize)
+                    val tStartMs = (idx.toLong() * 1000L) / SAMPLE_RATE
+                    val tEndMs = (blockEnd.toLong() * 1000L) / SAMPLE_RATE
+                    val gainStart = AudioSynthEngine.computeEffectiveAudioGain(clip, project, tStartMs)
+                    val gainEnd = AudioSynthEngine.computeEffectiveAudioGain(clip, project, tEndMs)
+                    val blockSpan = (blockEnd - idx).coerceAtLeast(1)
+
+                    for (s in idx until blockEnd) {
+                        val rel = s - startSample
+                        val srcSample = if (clip.trackType == TrackType.MUSIC) {
+                            sourcePcm[rel % sourcePcm.size]
+                        } else {
+                            if (rel < sourcePcm.size) sourcePcm[rel] else 0
                         }
-                        idx = blockEnd
+                        val frac = (s - idx).toFloat() / blockSpan
+                        val gain = gainStart + (gainEnd - gainStart) * frac
+                        val sampleNorm = srcSample / 32767f
+                        mixBuffer[s] += sampleNorm * gain
                     }
+                    idx = blockEnd
                 }
             }
+        }
 
         // 2. Mix Locked SFX attached to any clip
+        val anySoloActive = activeClips.any {
+            !it.audioConfig.isMuted && it.audioConfig.isSolo &&
+                (it.trackType == TrackType.VIDEO || it.trackType == TrackType.VOICEOVER || it.trackType == TrackType.MUSIC)
+        }
         activeClips.forEach { clip ->
+            if (clip.audioConfig.isMuted) return@forEach
+            if (anySoloActive && !clip.audioConfig.isSolo) return@forEach
             val sfxId = clip.lockedSfxId ?: return@forEach
             val preset = PresetCatalog.sfxPresets.firstOrNull { it.id == sfxId } ?: return@forEach
             val sfxPcm = AudioSynthEngine.generateSfxPcm(
@@ -132,7 +184,8 @@ object AudioExportMixer {
             var outputDone = false
             val samplesPerChunk = 1024
 
-            while (!outputDone) {
+            var idleIterations = 0
+            while (!outputDone && idleIterations < 600) {
                 if (!inputDone) {
                     val inIdx = codec.dequeueInputBuffer(5_000L)
                     if (inIdx >= 0) {
@@ -158,6 +211,7 @@ object AudioExportMixer {
                                 sampleCursor += count
                                 codec.queueInputBuffer(inIdx, 0, count * 2, ptsUs, 0)
                             }
+                            idleIterations = 0
                         }
                     }
                 }
@@ -166,8 +220,10 @@ object AudioExportMixer {
                 when {
                     outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
                         outputFormat = codec.outputFormat
+                        idleIterations = 0
                     }
                     outIdx >= 0 -> {
+                        idleIterations = 0
                         val outBuf = codec.getOutputBuffer(outIdx)
                         if (outBuf != null && bufferInfo.size > 0 && (bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) == 0) {
                             outBuf.position(bufferInfo.offset)
@@ -181,6 +237,7 @@ object AudioExportMixer {
                             outputDone = true
                         }
                     }
+                    else -> idleIterations++
                 }
             }
 
@@ -250,28 +307,38 @@ object AudioExportMixer {
             codec.configure(trackFormat, null, null, 0)
             codec.start()
 
-            val decodedMono = ArrayList<Short>(min(maxSamples, SAMPLE_RATE * 10))
+            val srcMaxSamples = ((maxSamples.toLong() * srcRate.coerceAtLeast(8000)) / SAMPLE_RATE)
+                .toInt()
+                .coerceAtLeast(maxSamples)
+            var decodedBuf = ShortArray(min(srcMaxSamples, srcRate * 8).coerceAtLeast(4096))
+            var decodedCount = 0
             val info = MediaCodec.BufferInfo()
             var sawInputEOS = false
             var sawOutputEOS = false
+            var stallCount = 0
 
-            while (!sawOutputEOS && decodedMono.size < maxSamples) {
+            while (!sawOutputEOS && decodedCount < srcMaxSamples && stallCount < 450) {
+                var progressed = false
                 if (!sawInputEOS) {
                     val inIdx = codec.dequeueInputBuffer(4_000L)
                     if (inIdx >= 0) {
-                        val buf = codec.getInputBuffer(inIdx) ?: continue
-                        val sampleSize = extractor.readSampleData(buf, 0)
-                        if (sampleSize < 0) {
-                            codec.queueInputBuffer(inIdx, 0, 0, 0L, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
-                            sawInputEOS = true
-                        } else {
-                            codec.queueInputBuffer(inIdx, 0, sampleSize, extractor.sampleTime, 0)
-                            extractor.advance()
+                        val buf = codec.getInputBuffer(inIdx)
+                        if (buf != null) {
+                            val sampleSize = extractor.readSampleData(buf, 0)
+                            if (sampleSize < 0) {
+                                codec.queueInputBuffer(inIdx, 0, 0, 0L, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                                sawInputEOS = true
+                            } else {
+                                codec.queueInputBuffer(inIdx, 0, sampleSize, extractor.sampleTime, 0)
+                                extractor.advance()
+                            }
+                            progressed = true
                         }
                     }
                 }
                 val outIdx = codec.dequeueOutputBuffer(info, 4_000L)
                 if (outIdx >= 0) {
+                    progressed = true
                     val outBuf = codec.getOutputBuffer(outIdx)
                     if (outBuf != null && info.size > 0) {
                         outBuf.position(info.offset)
@@ -279,36 +346,49 @@ object AudioExportMixer {
                         outBuf.order(ByteOrder.LITTLE_ENDIAN)
                         val ch = srcChannels.coerceAtLeast(1)
                         val totalShorts = info.size / 2
-                        var s = 0
-                        while (s + ch - 1 < totalShorts) {
-                            var sum = 0
-                            for (c in 0 until ch) {
-                                sum += outBuf.short.toInt()
+                        val framesInChunk = totalShorts / ch
+                        if (framesInChunk > 0) {
+                            val needed = decodedCount + framesInChunk
+                            if (needed > decodedBuf.size) {
+                                var nextCap = decodedBuf.size * 2
+                                while (nextCap < needed) nextCap *= 2
+                                decodedBuf = decodedBuf.copyOf(min(nextCap, srcMaxSamples + 4096))
                             }
-                            decodedMono.add((sum / ch).toShort())
-                            s += ch
+                            var s = 0
+                            while (s + ch - 1 < totalShorts && decodedCount < decodedBuf.size) {
+                                var sum = 0
+                                for (c in 0 until ch) {
+                                    sum += outBuf.short.toInt()
+                                }
+                                decodedBuf[decodedCount++] = (sum / ch).toShort()
+                                s += ch
+                            }
                         }
                     }
                     codec.releaseOutputBuffer(outIdx, false)
                     if ((info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
                         sawOutputEOS = true
                     }
+                } else if (outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                    progressed = true
                 }
+                stallCount = if (progressed) 0 else stallCount + 1
             }
 
-            if (decodedMono.isEmpty()) return null
+            if (decodedCount <= 0) return null
             if (srcRate == SAMPLE_RATE) {
-                decodedMono.take(maxSamples).toShortArray()
+                decodedBuf.copyOf(min(decodedCount, maxSamples))
             } else {
                 // Simple linear resample from srcRate to 44100 Hz
                 val ratio = srcRate.toDouble() / SAMPLE_RATE.toDouble()
-                val outLen = min(maxSamples, (decodedMono.size / ratio).toInt().coerceAtLeast(1))
+                val outLen = min(maxSamples, (decodedCount / ratio).toInt().coerceAtLeast(1))
+                val lastIdx = decodedCount - 1
                 ShortArray(outLen) { i ->
                     val srcPos = i * ratio
-                    val idx0 = srcPos.toInt().coerceIn(0, decodedMono.lastIndex)
-                    val idx1 = (idx0 + 1).coerceIn(0, decodedMono.lastIndex)
+                    val idx0 = srcPos.toInt().coerceIn(0, lastIdx)
+                    val idx1 = (idx0 + 1).coerceIn(0, lastIdx)
                     val frac = (srcPos - idx0).toFloat()
-                    (decodedMono[idx0] * (1f - frac) + decodedMono[idx1] * frac).toInt().toShort()
+                    (decodedBuf[idx0] * (1f - frac) + decodedBuf[idx1] * frac).toInt().toShort()
                 }
             }
         } catch (_: Throwable) {
@@ -321,15 +401,19 @@ object AudioExportMixer {
     }
 
     private fun generateAmbientCinemaPad(sampleCount: Int, seed: Int): ShortArray {
-        val baseFreq = 110f + (seed % 5) * 14f
+        val baseFreq = 98f + (seed % 5) * 12f // Deep warm root (G2-C3)
         val out = ShortArray(sampleCount)
+        var p1 = 0.0; var p2 = 0.0; var p3 = 0.0; var p4 = 0.0
         for (i in 0 until sampleCount) {
-            val t = i.toFloat() / SAMPLE_RATE
-            val swell = 0.55f + 0.45f * sin(2.0 * PI * 0.25 * t).toFloat()
-            val wave = 0.50f * sin(2.0 * PI * baseFreq * t).toFloat() +
-                0.30f * sin(2.0 * PI * (baseFreq * 1.5f) * t).toFloat() +
-                0.20f * sin(2.0 * PI * (baseFreq * 2.0f) * t).toFloat()
-            out[i] = (wave * swell * 0.22f * Short.MAX_VALUE).toInt().toShort()
+            val t = i.toDouble() / SAMPLE_RATE
+            val swell = 0.55 + 0.45 * sin(2.0 * PI * 0.16 * t)
+            p1 += 2.0 * PI * baseFreq / SAMPLE_RATE
+            p2 += 2.0 * PI * (baseFreq * 1.189) / SAMPLE_RATE // minor 3rd
+            p3 += 2.0 * PI * (baseFreq * 1.498) / SAMPLE_RATE // 5th
+            p4 += 2.0 * PI * (baseFreq * 2.245) / SAMPLE_RATE // warm 9th shimmer
+            val wave = 0.45 * sin(p1) + 0.22 * sin(p2) + 0.24 * sin(p3) + 0.12 * sin(p4)
+            val warm = kotlin.math.tanh(wave * swell * 1.15) * 0.24
+            out[i] = (warm.coerceIn(-0.95, 0.95) * Short.MAX_VALUE).toInt().toShort()
         }
         return out
     }

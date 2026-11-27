@@ -18,10 +18,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.BarChart
-import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -29,6 +27,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Slider
@@ -49,8 +48,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.domain.model.ComparisonChartConfig
-import com.example.domain.model.ComparisonGridConfig
-import com.example.domain.model.GeometricShape
 import com.example.domain.model.InvestigativeDocConfig
 import com.example.domain.model.InvestigativeToolType
 import com.example.domain.model.PresetCatalog
@@ -68,17 +65,142 @@ import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
 
 @Composable
-fun VfxAndTransitionInspector(
+fun TransitionStudioInspector(
+    clip: TimelineClip?,
+    isBangla: Boolean,
+    onUpdateClip: (String, (TimelineClip) -> TimelineClip) -> Unit,
+    onApplyTransitionToAll: (TransitionType, Long, TransitionType, Long) -> Unit
+) {
+    if (clip == null) {
+        Text(
+            text = if (isBangla) "ট্রানজিশন সেট করতে টাইমলাইনে যেকোনো ক্লিপ সিলেক্ট করুন" else "Select any timeline clip to configure transitions",
+            style = MaterialTheme.typography.bodySmall,
+            color = TextSecondary
+        )
+        return
+    }
+
+    // Start (Entry) Transition
+    Text(
+        text = if (isBangla) "শুরুর ট্রানজিশন (Start / In)" else "Start Transition (In)",
+        style = MaterialTheme.typography.labelMedium,
+        color = AmberDocumentary,
+        fontWeight = FontWeight.Bold
+    )
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        items(TransitionType.entries, key = { "in_${it.name}" }) { tr ->
+            FilterChip(
+                selected = clip.transitionIn == tr,
+                onClick = { onUpdateClip(clip.id) { it.copy(transitionIn = tr) } },
+                label = { Text(if (isBangla) tr.labelBn else tr.labelEn, style = MaterialTheme.typography.labelSmall) },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = AmberDocumentary,
+                    selectedLabelColor = StudioObsidian,
+                    labelColor = TextSecondary
+                )
+            )
+        }
+    }
+    if (clip.transitionIn != TransitionType.NONE) {
+        InspectorSlider(
+            label = if (isBangla) "শুরুর সময়কাল" else "Start Duration",
+            value = clip.transitionInDurationMs.toFloat(),
+            range = 200f..2500f,
+            valueText = "%.2fs".format(clip.transitionInDurationMs / 1000f)
+        ) { ms ->
+            onUpdateClip(clip.id) { it.copy(transitionInDurationMs = ms.toLong()) }
+        }
+    }
+
+    // End (Exit) Transition
+    Text(
+        text = if (isBangla) "শেষের ট্রানজিশন (End / Out)" else "End Transition (Out)",
+        style = MaterialTheme.typography.labelMedium,
+        color = CyanPlayhead,
+        fontWeight = FontWeight.Bold
+    )
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        items(TransitionType.entries, key = { "out_${it.name}" }) { tr ->
+            FilterChip(
+                selected = clip.transitionOut == tr,
+                onClick = { onUpdateClip(clip.id) { it.copy(transitionOut = tr) } },
+                label = { Text(if (isBangla) tr.labelBn else tr.labelEn, style = MaterialTheme.typography.labelSmall) },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = CyanPlayhead,
+                    selectedLabelColor = StudioObsidian,
+                    labelColor = TextSecondary
+                )
+            )
+        }
+    }
+    if (clip.transitionOut != TransitionType.NONE) {
+        InspectorSlider(
+            label = if (isBangla) "শেষের সময়কাল" else "End Duration",
+            value = clip.transitionOutDurationMs.toFloat(),
+            range = 200f..2500f,
+            valueText = "%.2fs".format(clip.transitionOutDurationMs / 1000f)
+        ) { ms ->
+            onUpdateClip(clip.id) { it.copy(transitionOutDurationMs = ms.toLong()) }
+        }
+    }
+
+    Button(
+        onClick = {
+            onApplyTransitionToAll(
+                clip.transitionIn,
+                clip.transitionInDurationMs,
+                clip.transitionOut,
+                clip.transitionOutDurationMs
+            )
+        },
+        colors = ButtonDefaults.buttonColors(containerColor = AmberDocumentary.copy(alpha = 0.2f), contentColor = AmberDocumentary),
+        border = BorderStroke(1.dp, AmberDocumentary.copy(alpha = 0.65f)),
+        shape = RoundedCornerShape(10.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+            text = if (isBangla) "সব ভিডিও ক্লিপে প্রয়োগ করুন" else "Apply to All Video Clips",
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Bold
+        )
+    }
+}
+
+@Composable
+fun VfxStudioInspector(
     clip: TimelineClip?,
     isBangla: Boolean,
     onAddVfxClip: (VfxEffectType) -> Unit,
     onUpdateClip: (String, (TimelineClip) -> TimelineClip) -> Unit
 ) {
-    Text(
-        text = if (isBangla) "হলিউড VFX ও সিনেমাটিক ট্রানজিশন" else "Hollywood VFX & Cinema Transitions",
-        style = MaterialTheme.typography.labelMedium,
-        color = CyanPlayhead
-    )
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = if (isBangla) "হলিউড VFX লেয়ার (১২+ ইফেক্ট)" else "Hollywood VFX Layers",
+            style = MaterialTheme.typography.labelMedium,
+            color = CyanPlayhead,
+            fontWeight = FontWeight.Bold
+        )
+        Surface(
+            onClick = { onAddVfxClip(VfxEffectType.VOLUMETRIC_GOD_RAYS) },
+            color = CyanPlayhead.copy(alpha = 0.16f),
+            shape = RoundedCornerShape(8.dp),
+            border = BorderStroke(1.dp, CyanPlayhead.copy(alpha = 0.65f))
+        ) {
+            Text(
+                text = if (isBangla) "+ নতুন VFX লেয়ার" else "+ New VFX Layer",
+                style = MaterialTheme.typography.labelSmall,
+                color = CyanPlayhead,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+            )
+        }
+    }
 
     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         items(VfxEffectType.entries.filter { it != VfxEffectType.NONE }, key = { it.name }) { effect ->
@@ -126,28 +248,6 @@ fun VfxAndTransitionInspector(
             onUpdateClip(clip.id) { it.copy(vfxConfig = vfx.copy(speed = next)) }
         }
     }
-
-    if (clip != null) {
-        Text(
-            text = if (isBangla) "ক্লিপ এন্ট্রি ট্রানজিশন" else "Clip Entry Transition",
-            style = MaterialTheme.typography.labelMedium,
-            color = AmberDocumentary
-        )
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(TransitionType.entries, key = { it.name }) { tr ->
-                FilterChip(
-                    selected = clip.transitionIn == tr,
-                    onClick = { onUpdateClip(clip.id) { it.copy(transitionIn = tr) } },
-                    label = { Text(if (isBangla) tr.labelBn else tr.labelEn, style = MaterialTheme.typography.labelSmall) },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = AmberDocumentary,
-                        selectedLabelColor = StudioObsidian,
-                        labelColor = TextSecondary
-                    )
-                )
-            }
-        }
-    }
 }
 
 @Composable
@@ -155,58 +255,78 @@ fun OverlayProInspector(
     clip: TimelineClip?,
     isBangla: Boolean,
     onAddChart: (Int) -> Unit,
-    onAddComparisonGrid: (Int) -> Unit,
     onAddInvestigativeTool: (InvestigativeToolType) -> Unit,
-    onPickSlotMedia: (clipId: String, slotId: String) -> Unit,
+    onOpenChartStudio: () -> Unit,
+    onOpenMapStudio: () -> Unit,
     onUpdateClip: (String, (TimelineClip) -> TimelineClip) -> Unit
 ) {
-    // Quick-create cards for Charts (2-60 bars), 2-4 Slot Comparison, and Investigative Tools
+    // Prominent Pro Studio launchers + Quick Add
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Surface(
+            onClick = onOpenChartStudio,
+            color = Color(0xFF102235),
+            shape = RoundedCornerShape(10.dp),
+            border = BorderStroke(1.dp, CyanPlayhead.copy(alpha = 0.7f)),
+            modifier = Modifier.weight(1f)
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                Icon(Icons.Default.BarChart, contentDescription = null, tint = CyanPlayhead, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = if (isBangla) "📊 কাস্টম চার্ট ও গ্রাফ স্টুডিও" else "Chart Studio",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = CyanPlayhead,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+        Surface(
+            onClick = onOpenMapStudio,
+            color = Color(0xFF0E261E),
+            shape = RoundedCornerShape(10.dp),
+            border = BorderStroke(1.dp, EmeraldAudio.copy(alpha = 0.7f)),
+            modifier = Modifier.weight(1f)
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                Icon(Icons.Default.Search, contentDescription = null, tint = EmeraldAudio, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = if (isBangla) "🗺️ ম্যাপ রাডার স্টুডিও" else "Map Studio",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = EmeraldAudio,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+    }
+
+    // Quick-add pills for Investigative Documentary Tools
     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
             Surface(
-                onClick = { onAddChart(12) },
+                onClick = { onAddChart(0) },
                 color = StudioSurfaceElevated,
                 shape = RoundedCornerShape(10.dp),
-                border = BorderStroke(1.dp, CyanPlayhead.copy(alpha = 0.6f))
+                border = BorderStroke(1.dp, AmberDocumentary.copy(alpha = 0.6f))
             ) {
                 Row(
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(Icons.Default.BarChart, contentDescription = null, tint = CyanPlayhead, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(if (isBangla) "+ ৬০-বার চার্ট" else "+ 60-Bar Chart", style = MaterialTheme.typography.labelSmall, color = TextPrimary)
+                    Icon(Icons.Default.BarChart, contentDescription = null, tint = AmberDocumentary, modifier = Modifier.size(15.dp))
+                    Spacer(modifier = Modifier.width(5.dp))
+                    Text(if (isBangla) "+ নতুন চার্ট (০ থেকে)" else "+ New Chart (0)", style = MaterialTheme.typography.labelSmall, color = TextPrimary)
                 }
             }
         }
-        listOf(2, 3, 4).forEach { count ->
-            item {
-                Surface(
-                    onClick = { onAddComparisonGrid(count) },
-                    color = StudioSurfaceElevated,
-                    shape = RoundedCornerShape(10.dp),
-                    border = BorderStroke(1.dp, AmberDocumentary.copy(alpha = 0.6f))
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(Icons.Default.GridView, contentDescription = null, tint = AmberDocumentary, modifier = Modifier.size(15.dp))
-                        Spacer(modifier = Modifier.width(5.dp))
-                        Text(if (isBangla) "+ $count ছবি/ভিডিও" else "+ $count-Slot Grid", style = MaterialTheme.typography.labelSmall, color = TextPrimary)
-                    }
-                }
-            }
-        }
-    }
-
-    // Investigative Documentary Tools selector
-    Text(
-        text = if (isBangla) "অনুসন্ধানমূলক ডকুমেন্টারি টুলস" else "Investigative Documentary Tools",
-        style = MaterialTheme.typography.labelMedium,
-        color = EmeraldAudio
-    )
-    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         items(InvestigativeToolType.entries.filter { it != InvestigativeToolType.NONE }, key = { it.name }) { tool ->
             FilterChip(
                 selected = clip?.investigativeConfig?.toolType == tool,
@@ -222,23 +342,13 @@ fun OverlayProInspector(
         }
     }
 
-    // Selected Clip Specific Editor: 60-Bar Chart
+    // Selected Clip Specific Editor: Custom Chart
     clip?.chartConfig?.let { chart ->
         ChartConfigEditor(
             clipId = clip.id,
             chart = chart,
             isBangla = isBangla,
-            onUpdateClip = onUpdateClip
-        )
-    }
-
-    // Selected Clip Specific Editor: 2-4 Slot Comparison Grid with Geometric Shapes
-    clip?.comparisonGrid?.let { grid ->
-        ComparisonGridConfigEditor(
-            clipId = clip.id,
-            grid = grid,
-            isBangla = isBangla,
-            onPickSlotMedia = onPickSlotMedia,
+            onOpenChartStudio = onOpenChartStudio,
             onUpdateClip = onUpdateClip
         )
     }
@@ -249,6 +359,7 @@ fun OverlayProInspector(
             clipId = clip.id,
             doc = doc,
             isBangla = isBangla,
+            onOpenMapStudio = onOpenMapStudio,
             onUpdateClip = onUpdateClip
         )
     }
@@ -259,13 +370,12 @@ private fun ChartConfigEditor(
     clipId: String,
     chart: ComparisonChartConfig,
     isBangla: Boolean,
+    onOpenChartStudio: () -> Unit,
     onUpdateClip: (String, (TimelineClip) -> TimelineClip) -> Unit
 ) {
     var selectedBarIdx by remember(clipId) { mutableIntStateOf(0) }
-    val safeBars = if (chart.bars.size < chart.barCount) {
-        val generated = PresetCatalog.generateDefaultBars(chart.barCount)
-        chart.bars + generated.drop(chart.bars.size)
-    } else chart.bars
+    val safeCount = chart.barCount.coerceIn(0, 100)
+    val safeBars = chart.bars.take(safeCount)
 
     OutlinedTextField(
         value = chart.title,
@@ -276,35 +386,95 @@ private fun ChartConfigEditor(
         modifier = Modifier.fillMaxWidth()
     )
 
-    InspectorSlider(
-        label = if (isBangla) "মোট বারের সংখ্যা (২ থেকে ৬০টি)" else "Bar Count (2..60)",
-        value = chart.barCount.toFloat(),
-        range = 2f..60f,
-        valueText = "${chart.barCount} টি"
-    ) { countFloat ->
-        val nextCount = countFloat.toInt().coerceIn(2, 60)
-        val expanded = if (chart.bars.size < nextCount) {
-            val defaults = PresetCatalog.generateDefaultBars(nextCount)
-            chart.bars + defaults.drop(chart.bars.size)
-        } else chart.bars
-        onUpdateClip(clipId) { it.copy(chartConfig = chart.copy(barCount = nextCount, bars = expanded)) }
+    // Graph Visualization Style Switcher
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        items(com.example.domain.model.ChartVisualStyle.entries, key = { it.name }) { visualStyle ->
+            val active = chart.chartStyle == visualStyle
+            FilterChip(
+                selected = active,
+                onClick = {
+                    onUpdateClip(clipId) {
+                        it.copy(
+                            chartConfig = chart.copy(
+                                chartStyle = visualStyle,
+                                isHorizontal = when (visualStyle) {
+                                    com.example.domain.model.ChartVisualStyle.HORIZONTAL_BAR -> true
+                                    com.example.domain.model.ChartVisualStyle.VERTICAL_BAR -> false
+                                    else -> chart.isHorizontal
+                                }
+                            )
+                        )
+                    }
+                },
+                label = { Text(if (isBangla) visualStyle.labelBn else visualStyle.labelEn, style = MaterialTheme.typography.labelSmall) },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = CyanPlayhead,
+                    selectedLabelColor = StudioObsidian,
+                    labelColor = TextSecondary
+                )
+            )
+        }
     }
 
-    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        Text(if (isBangla) "হরাইজন্টাল বার" else "Horizontal Bars", style = MaterialTheme.typography.bodySmall, color = TextPrimary)
-        Switch(
-            checked = chart.isHorizontal,
-            onCheckedChange = { h -> onUpdateClip(clipId) { it.copy(chartConfig = chart.copy(isHorizontal = h)) } },
-            colors = SwitchDefaults.colors(checkedThumbColor = CyanPlayhead)
-        )
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        items(com.example.domain.model.ChartPaletteTheme.entries, key = { it.name }) { theme ->
+            val active = chart.paletteTheme == theme
+            FilterChip(
+                selected = active,
+                onClick = {
+                    val recolored = safeBars.mapIndexed { idx, item ->
+                        item.copy(colorHex = theme.colors[idx % theme.colors.size])
+                    }
+                    onUpdateClip(clipId) { it.copy(chartConfig = chart.copy(paletteTheme = theme, bars = recolored)) }
+                },
+                label = { Text(if (isBangla) theme.labelBn else theme.labelEn, style = MaterialTheme.typography.labelSmall) },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = Color(theme.colors.first()),
+                    selectedLabelColor = StudioObsidian,
+                    labelColor = TextSecondary
+                )
+            )
+        }
     }
 
-    // Individual Bar Editor (pick any of 1..barCount and edit label/value)
-    val clampedIdx = selectedBarIdx.coerceIn(0, (chart.barCount - 1).coerceAtLeast(0))
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Button(
+            onClick = {
+                if (safeBars.size < 100) {
+                    val idx = safeBars.size + 1
+                    val palette = chart.paletteTheme.colors
+                    val added = safeBars + com.example.domain.model.ChartBarItem(
+                        label = if (isBangla) "ডেটা $idx" else "Item $idx",
+                        value = 50f,
+                        colorHex = palette[(idx - 1) % palette.size]
+                    )
+                    onUpdateClip(clipId) { it.copy(chartConfig = chart.copy(barCount = added.size, bars = added)) }
+                    selectedBarIdx = added.lastIndex
+                }
+            },
+            colors = ButtonDefaults.buttonColors(containerColor = AmberDocumentary, contentColor = StudioObsidian),
+            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier.weight(1.2f)
+        ) {
+            Text(if (isBangla) "+ ১টি ডেটা যোগ (${safeBars.size})" else "+ Add Item (${safeBars.size})", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+        }
+        OutlinedButton(
+            onClick = {
+                onUpdateClip(clipId) { it.copy(chartConfig = chart.copy(barCount = 0, bars = emptyList())) }
+            },
+            border = BorderStroke(1.dp, Color(0xFFFF4D6D).copy(alpha = 0.6f)),
+            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier.weight(0.8f)
+        ) {
+            Text(if (isBangla) "সব মুছুন (০)" else "Clear (0)", style = MaterialTheme.typography.labelSmall, color = Color(0xFFFF4D6D))
+        }
+    }
+
+    val clampedIdx = selectedBarIdx.coerceIn(0, (safeBars.size - 1).coerceAtLeast(0))
     val activeBar = safeBars.getOrNull(clampedIdx)
     if (activeBar != null) {
         LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            items((0 until chart.barCount).toList()) { idx ->
+            items((0 until safeBars.size).toList()) { idx ->
                 FilterChip(
                     selected = clampedIdx == idx,
                     onClick = { selectedBarIdx = idx },
@@ -318,9 +488,9 @@ private fun ChartConfigEditor(
                 onValueChange = { lbl ->
                     val updated = safeBars.toMutableList()
                     updated[clampedIdx] = activeBar.copy(label = lbl)
-                    onUpdateClip(clipId) { it.copy(chartConfig = chart.copy(bars = updated)) }
+                    onUpdateClip(clipId) { it.copy(chartConfig = chart.copy(bars = updated, barCount = updated.size)) }
                 },
-                label = { Text(if (isBangla) "বার #${clampedIdx + 1} নাম" else "Label") },
+                label = { Text(if (isBangla) "আইটেম #${clampedIdx + 1} নাম" else "Label") },
                 singleLine = true,
                 colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = CyanPlayhead, unfocusedBorderColor = StudioBorder, focusedTextColor = TextPrimary, unfocusedTextColor = TextPrimary),
                 modifier = Modifier.weight(1f)
@@ -329,94 +499,22 @@ private fun ChartConfigEditor(
         InspectorSlider(
             label = if (isBangla) "মান (${activeBar.label})" else "Value",
             value = activeBar.value,
-            range = 1f..100f,
+            range = 1f..1000f,
             valueText = "${activeBar.value.toInt()}${chart.unitSuffix}"
         ) { v ->
             val updated = safeBars.toMutableList()
             updated[clampedIdx] = activeBar.copy(value = v)
-            onUpdateClip(clipId) { it.copy(chartConfig = chart.copy(bars = updated)) }
-        }
-    }
-}
-
-@Composable
-private fun ComparisonGridConfigEditor(
-    clipId: String,
-    grid: ComparisonGridConfig,
-    isBangla: Boolean,
-    onPickSlotMedia: (clipId: String, slotId: String) -> Unit,
-    onUpdateClip: (String, (TimelineClip) -> TimelineClip) -> Unit
-) {
-    var activeSlotIdx by remember(clipId) { mutableIntStateOf(0) }
-    val slots = grid.slots.take(grid.slotCount.coerceIn(2, 4))
-    val safeIdx = activeSlotIdx.coerceIn(0, (slots.size - 1).coerceAtLeast(0))
-    val currentSlot = slots.getOrNull(safeIdx)
-
-    Text(
-        text = if (isBangla) "তুলনামূলক ছবি/ভিডিও স্লট ও জ্যামিতিক শেপ" else "Comparison Slots & Geometric Shapes",
-        style = MaterialTheme.typography.labelMedium,
-        color = AmberDocumentary
-    )
-
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        slots.forEachIndexed { idx, slot ->
-            FilterChip(
-                selected = safeIdx == idx,
-                onClick = { activeSlotIdx = idx },
-                label = { Text(if (isBangla) "স্লট ${idx + 1}" else "Slot ${idx + 1}", style = MaterialTheme.typography.labelSmall) },
-                colors = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = AmberDocumentary,
-                    selectedLabelColor = StudioObsidian
-                )
-            )
+            onUpdateClip(clipId) { it.copy(chartConfig = chart.copy(bars = updated, barCount = updated.size)) }
         }
     }
 
-    if (currentSlot != null) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            OutlinedTextField(
-                value = currentSlot.caption,
-                onValueChange = { cap ->
-                    val nextSlots = grid.slots.map { if (it.id == currentSlot.id) it.copy(caption = cap) else it }
-                    onUpdateClip(clipId) { it.copy(comparisonGrid = grid.copy(slots = nextSlots)) }
-                },
-                label = { Text(if (isBangla) "স্লট ক্যাপশন" else "Slot Caption") },
-                singleLine = true,
-                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = AmberDocumentary, unfocusedBorderColor = StudioBorder, focusedTextColor = TextPrimary, unfocusedTextColor = TextPrimary),
-                modifier = Modifier.weight(1f)
-            )
-            Button(
-                onClick = { onPickSlotMedia(clipId, currentSlot.id) },
-                colors = ButtonDefaults.buttonColors(containerColor = CyanPlayhead, contentColor = StudioObsidian),
-                shape = RoundedCornerShape(10.dp)
-            ) {
-                Icon(Icons.Default.AddPhotoAlternate, contentDescription = null, modifier = Modifier.size(16.dp))
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(if (isBangla) "ছবি/ভিডিও" else "Media", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-            }
-        }
-
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            items(GeometricShape.entries, key = { it.name }) { gShape ->
-                FilterChip(
-                    selected = currentSlot.shape == gShape,
-                    onClick = {
-                        val nextSlots = grid.slots.map { if (it.id == currentSlot.id) it.copy(shape = gShape) else it }
-                        onUpdateClip(clipId) { it.copy(comparisonGrid = grid.copy(slots = nextSlots)) }
-                    },
-                    label = { Text(if (isBangla) gShape.labelBn else gShape.labelEn, style = MaterialTheme.typography.labelSmall) },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = CyanPlayhead,
-                        selectedLabelColor = StudioObsidian,
-                        labelColor = TextSecondary
-                    )
-                )
-            }
-        }
+    Button(
+        onClick = onOpenChartStudio,
+        colors = ButtonDefaults.buttonColors(containerColor = CyanPlayhead, contentColor = StudioObsidian),
+        shape = RoundedCornerShape(10.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Text(if (isBangla) "ফুল-স্ক্রিন চার্ট ও গ্রাফ স্টুডিও খুলুন" else "Open Full Chart Studio", fontWeight = FontWeight.Bold)
     }
 }
 
@@ -425,6 +523,7 @@ private fun InvestigativeConfigEditor(
     clipId: String,
     doc: InvestigativeDocConfig,
     isBangla: Boolean,
+    onOpenMapStudio: () -> Unit,
     onUpdateClip: (String, (TimelineClip) -> TimelineClip) -> Unit
 ) {
     OutlinedTextField(
@@ -436,6 +535,20 @@ private fun InvestigativeConfigEditor(
         modifier = Modifier.fillMaxWidth()
     )
     if (doc.toolType == InvestigativeToolType.MAP_RADAR_ROUTE) {
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(com.example.domain.model.MapRadarStyle.entries, key = { it.name }) { style ->
+                FilterChip(
+                    selected = doc.mapStyle == style,
+                    onClick = { onUpdateClip(clipId) { it.copy(investigativeConfig = doc.copy(mapStyle = style)) } },
+                    label = { Text(if (isBangla) style.labelBn else style.labelEn, style = MaterialTheme.typography.labelSmall) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = Color(style.routeHex),
+                        selectedLabelColor = StudioObsidian,
+                        labelColor = TextSecondary
+                    )
+                )
+            }
+        }
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedTextField(
                 value = doc.pointALabel,
@@ -453,6 +566,22 @@ private fun InvestigativeConfigEditor(
                 colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = AmberDocumentary, unfocusedBorderColor = StudioBorder, focusedTextColor = TextPrimary, unfocusedTextColor = TextPrimary),
                 modifier = Modifier.weight(1f)
             )
+        }
+        OutlinedTextField(
+            value = doc.distanceLabel,
+            onValueChange = { d -> onUpdateClip(clipId) { it.copy(investigativeConfig = doc.copy(distanceLabel = d)) } },
+            label = { Text(if (isBangla) "দূরত্ব ব্যাজ" else "Distance Badge") },
+            singleLine = true,
+            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = EmeraldAudio, unfocusedBorderColor = StudioBorder, focusedTextColor = TextPrimary, unfocusedTextColor = TextPrimary),
+            modifier = Modifier.fillMaxWidth()
+        )
+        Button(
+            onClick = onOpenMapStudio,
+            colors = ButtonDefaults.buttonColors(containerColor = EmeraldAudio, contentColor = StudioObsidian),
+            shape = RoundedCornerShape(10.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(if (isBangla) "ম্যাপে ট্যাপ করে A/B/C রুট সাজান" else "Open Interactive Map Studio", fontWeight = FontWeight.Bold)
         }
     } else if (doc.toolType == InvestigativeToolType.STAT_YEAR_COUNTER) {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {

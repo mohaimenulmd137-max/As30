@@ -87,6 +87,8 @@ import com.example.domain.engine.CustomFontManager
 import com.example.domain.engine.VoiceoverRecorder
 import com.example.domain.model.AnimationCategory
 import com.example.domain.model.BlendModeOption
+import com.example.domain.model.BorderConfig
+import com.example.domain.model.BorderShapeStyle
 import com.example.domain.model.InvestigativeToolType
 import com.example.domain.model.LowerThirdTemplate
 import com.example.domain.model.MaskShape
@@ -97,6 +99,7 @@ import com.example.domain.model.StudioTextAlign
 import com.example.domain.model.TextLayerConfig
 import com.example.domain.model.TimelineClip
 import com.example.domain.model.TrackType
+import com.example.domain.model.TransitionType
 import com.example.domain.model.VfxEffectType
 import com.example.ui.theme.AmberDocumentary
 import com.example.ui.theme.CoralAction
@@ -117,8 +120,9 @@ enum class ProToolSection(val labelBn: String, val labelEn: String) {
     BACKGROUND("ব্যাকগ্রাউন্ড ও মাস্ক", "Background"),
     VOLUME("ভলিউম ও অটো-ডাকিং", "Audio & SFX"),
     TEXT_FONT("টেক্সট ও ফন্ট", "Text & Font"),
-    TRANSITION_VFX("ট্রানজিশন ও VFX", "VFX & Trans"),
-    OVERLAY_PRO("চার্ট / কম্পারিজন / ডক", "Charts & Doc")
+    TRANSITION("ট্রানজিশন স্টুডিও", "Transition Studio"),
+    VFX("হলিউড VFX", "Hollywood VFX"),
+    OVERLAY_PRO("চার্ট / ম্যাপ / ডক", "Charts & Map Doc")
 }
 
 @Composable
@@ -250,11 +254,11 @@ fun BottomActionToolGrid(
             )
             ProGridTile(
                 icon = Icons.Default.AutoAwesome,
-                label = if (isBangla) "ট্রানজিশন" else "VFX/Trans",
+                label = if (isBangla) "ট্রানজিশন" else "Transition",
                 tint = Color(0xFF2DD4BF),
-                isActive = activeSection == ProToolSection.TRANSITION_VFX,
+                isActive = activeSection == ProToolSection.TRANSITION || activeSection == ProToolSection.VFX,
                 tag = "grid_transition",
-                onClick = { onSelectSection(ProToolSection.TRANSITION_VFX) },
+                onClick = { onSelectSection(ProToolSection.TRANSITION) },
                 modifier = Modifier.weight(1f)
             )
             ProGridTile(
@@ -314,17 +318,22 @@ private fun ProGridTile(
 fun ExpandableInspectorSheet(
     section: ProToolSection,
     selectedClip: TimelineClip?,
+    allClips: List<TimelineClip> = emptyList(),
     playheadMs: Long,
     isBangla: Boolean,
     voiceoverRecorder: VoiceoverRecorder,
     onUpdateClip: (String, (TimelineClip) -> TimelineClip) -> Unit,
+    onSelectAudioTarget: (String) -> Unit = {},
+    onOpenFloatingAnimEditor: () -> Unit = {},
     onAddKeyframe: (String) -> Unit,
     onSeek: (Long) -> Unit,
     onAddVfxClip: (VfxEffectType) -> Unit,
+    onApplyTransitionToAll: (TransitionType, Long, TransitionType, Long) -> Unit = { _, _, _, _ -> },
+    onSwitchSection: (ProToolSection) -> Unit = {},
     onAddChart: (Int) -> Unit,
-    onAddComparisonGrid: (Int) -> Unit,
     onAddInvestigativeTool: (InvestigativeToolType) -> Unit,
-    onPickSlotMedia: (clipId: String, slotId: String) -> Unit,
+    onOpenChartStudio: () -> Unit = {},
+    onOpenMapStudio: () -> Unit = {},
     onPickAudioFile: () -> Unit,
     onImportCustomFont: (clipId: String) -> Unit,
     onVoiceoverRecorded: (String, Long) -> Unit,
@@ -427,6 +436,20 @@ fun ExpandableInspectorSheet(
 
                 ProToolSection.ANIMATION -> {
                     if (selectedClip != null) {
+                        Button(
+                            onClick = onOpenFloatingAnimEditor,
+                            colors = ButtonDefaults.buttonColors(containerColor = AmberDocumentary, contentColor = StudioObsidian),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth().testTag("open_floating_anim_btn")
+                        ) {
+                            Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = if (isBangla) "✨ ফ্লোটিং অ্যানিমেশন এডিটর খুলুন" else "✨ Open Floating Animation Editor",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        }
                         MotionAnimationInspector(selectedClip, isBangla) { fn -> onUpdateClip(selectedClip.id, fn) }
                         KeyframeInspector(selectedClip, playheadMs, isBangla, { onAddKeyframe(selectedClip.id) }, onSeek) { fn -> onUpdateClip(selectedClip.id, fn) }
                     } else {
@@ -445,8 +468,10 @@ fun ExpandableInspectorSheet(
                 ProToolSection.VOLUME -> {
                     AudioMixInspector(
                         clip = selectedClip,
+                        allClips = allClips,
                         isBangla = isBangla,
                         voiceoverRecorder = voiceoverRecorder,
+                        onSelectAudioTarget = onSelectAudioTarget,
                         onUpdateClip = { fn -> selectedClip?.let { onUpdateClip(it.id, fn) } },
                         onPickAudioFile = onPickAudioFile,
                         onVoiceoverRecorded = onVoiceoverRecorded
@@ -469,13 +494,46 @@ fun ExpandableInspectorSheet(
                     }
                 }
 
-                ProToolSection.TRANSITION_VFX -> {
-                    VfxAndTransitionInspector(
-                        clip = selectedClip,
-                        isBangla = isBangla,
-                        onAddVfxClip = onAddVfxClip,
-                        onUpdateClip = onUpdateClip
-                    )
+                ProToolSection.TRANSITION, ProToolSection.VFX -> {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(
+                            selected = section == ProToolSection.TRANSITION,
+                            onClick = { onSwitchSection(ProToolSection.TRANSITION) },
+                            label = { Text(if (isBangla) "✨ ট্রানজিশন (Start/End)" else "Transition", style = MaterialTheme.typography.labelSmall) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = AmberDocumentary,
+                                selectedLabelColor = StudioObsidian,
+                                labelColor = TextSecondary
+                            ),
+                            modifier = Modifier.weight(1f)
+                        )
+                        FilterChip(
+                            selected = section == ProToolSection.VFX,
+                            onClick = { onSwitchSection(ProToolSection.VFX) },
+                            label = { Text(if (isBangla) "🎬 হলিউড VFX" else "Hollywood VFX", style = MaterialTheme.typography.labelSmall) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = CyanPlayhead,
+                                selectedLabelColor = StudioObsidian,
+                                labelColor = TextSecondary
+                            ),
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    if (section == ProToolSection.TRANSITION) {
+                        TransitionStudioInspector(
+                            clip = selectedClip,
+                            isBangla = isBangla,
+                            onUpdateClip = onUpdateClip,
+                            onApplyTransitionToAll = onApplyTransitionToAll
+                        )
+                    } else {
+                        VfxStudioInspector(
+                            clip = selectedClip,
+                            isBangla = isBangla,
+                            onAddVfxClip = onAddVfxClip,
+                            onUpdateClip = onUpdateClip
+                        )
+                    }
                 }
 
                 ProToolSection.OVERLAY_PRO -> {
@@ -483,9 +541,9 @@ fun ExpandableInspectorSheet(
                         clip = selectedClip,
                         isBangla = isBangla,
                         onAddChart = onAddChart,
-                        onAddComparisonGrid = onAddComparisonGrid,
                         onAddInvestigativeTool = onAddInvestigativeTool,
-                        onPickSlotMedia = onPickSlotMedia,
+                        onOpenChartStudio = onOpenChartStudio,
+                        onOpenMapStudio = onOpenMapStudio,
                         onUpdateClip = onUpdateClip
                     )
                 }
@@ -867,11 +925,22 @@ private fun MotionAnimationInspector(
             }
             Surface(
                 onClick = {
+                    val isNone = spec.id == "in_none" || spec.id == "out_none" || spec.id == "loop_none"
                     onUpdateClip {
+                        val prof = it.animationProfile
                         when (spec.category) {
-                            AnimationCategory.IN -> it.copy(inAnimationId = spec.id)
-                            AnimationCategory.OUT -> it.copy(outAnimationId = spec.id)
-                            AnimationCategory.LOOP -> it.copy(loopAnimationId = spec.id)
+                            AnimationCategory.IN -> it.copy(
+                                inAnimationId = spec.id,
+                                animationProfile = prof.copy(inSlot = prof.inSlot.copy(animationId = spec.id, enabled = !isNone))
+                            )
+                            AnimationCategory.OUT -> it.copy(
+                                outAnimationId = spec.id,
+                                animationProfile = prof.copy(outSlot = prof.outSlot.copy(animationId = spec.id, enabled = !isNone))
+                            )
+                            AnimationCategory.LOOP -> it.copy(
+                                loopAnimationId = spec.id,
+                                animationProfile = prof.copy(loopSlot = prof.loopSlot.copy(animationId = spec.id, enabled = !isNone))
+                            )
                         }
                     }
                 },
@@ -954,13 +1023,73 @@ private fun MaskAndBlendInspector(
     isBangla: Boolean,
     onUpdateClip: ((TimelineClip) -> TimelineClip) -> Unit
 ) {
+    // 1. Geometric Borders & Frame Shapes (10 Styles)
+    val border = clip.borderConfig
+    Text(
+        text = if (isBangla) "জ্যামিতিক বর্ডার ও ফ্রেম স্টাইল (১০টি)" else "Geometric Border & Frame Style",
+        style = MaterialTheme.typography.labelMedium,
+        color = AmberDocumentary,
+        fontWeight = FontWeight.Bold
+    )
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        items(BorderShapeStyle.entries, key = { it.name }) { style ->
+            FilterChip(
+                selected = border.style == style,
+                onClick = { onUpdateClip { it.copy(borderConfig = border.copy(style = style)) } },
+                label = { Text(if (isBangla) style.labelBn else style.labelEn, style = MaterialTheme.typography.labelSmall) },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = AmberDocumentary,
+                    selectedLabelColor = StudioObsidian,
+                    labelColor = TextPrimary
+                )
+            )
+        }
+    }
+
+    if (border.style != BorderShapeStyle.NONE) {
+        ColorSwatchRow(
+            title = if (isBangla) "বর্ডার কালার" else "Border Color",
+            selectedHex = border.colorHex,
+            onSelect = { hex -> onUpdateClip { it.copy(borderConfig = border.copy(colorHex = hex)) } }
+        )
+        if (border.style == BorderShapeStyle.DOUBLE_FRAME || border.style == BorderShapeStyle.NEON_DASHED) {
+            ColorSwatchRow(
+                title = if (isBangla) "সেকেন্ডারি বর্ডার কালার" else "Secondary Border Color",
+                selectedHex = border.secondaryColorHex,
+                onSelect = { hex -> onUpdateClip { it.copy(borderConfig = border.copy(secondaryColorHex = hex)) } }
+            )
+        }
+        InspectorSlider(if (isBangla) "বর্ডার পুরুত্ব" else "Border Thickness", border.thicknessDp, 1f..20f, "${border.thicknessDp.toInt()}dp") { t ->
+            onUpdateClip { it.copy(borderConfig = border.copy(thicknessDp = t)) }
+        }
+        InspectorSlider(if (isBangla) "নিয়ন গ্লো" else "Border Glow", border.glowRadius, 0f..24f, "${border.glowRadius.toInt()}px") { g ->
+            onUpdateClip { it.copy(borderConfig = border.copy(glowRadius = g)) }
+        }
+        InspectorSlider(if (isBangla) "কর্নার রাউন্ড" else "Corner Radius", border.cornerRadiusDp, 0f..36f, "${border.cornerRadiusDp.toInt()}dp") { r ->
+            onUpdateClip { it.copy(borderConfig = border.copy(cornerRadiusDp = r)) }
+        }
+        InspectorSlider(if (isBangla) "ফ্রেম ইনসেট (ফাঁকা)" else "Frame Inset", border.insetPercent, 0f..0.20f, "${(border.insetPercent * 100).toInt()}%") { ins ->
+            onUpdateClip { it.copy(borderConfig = border.copy(insetPercent = ins)) }
+        }
+    }
+
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        Text(if (isBangla) "ক্রোমা কী / ব্যাকগ্রাউন্ড রিমুভ" else "Chroma Key Cutout", style = MaterialTheme.typography.bodySmall, color = EmeraldAudio)
+        Text(if (isBangla) "ক্রোমা কী / গ্রিন-স্ক্রিন রিমুভ" else "Green Screen Chroma Key", style = MaterialTheme.typography.bodySmall, color = EmeraldAudio)
         Switch(
             checked = clip.colorGrade.chromaKeyEnabled,
             onCheckedChange = { ck -> onUpdateClip { it.copy(colorGrade = it.colorGrade.copy(chromaKeyEnabled = ck)) } },
             colors = SwitchDefaults.colors(checkedThumbColor = EmeraldAudio)
         )
+    }
+    if (clip.colorGrade.chromaKeyEnabled) {
+        InspectorSlider(
+            label = if (isBangla) "ক্রোমা কী তীব্রতা" else "Chroma Key Strength",
+            value = clip.colorGrade.chromaKeyStrength,
+            range = 0.15f..0.95f,
+            valueText = "${(clip.colorGrade.chromaKeyStrength * 100).toInt()}%"
+        ) { str ->
+            onUpdateClip { it.copy(colorGrade = it.colorGrade.copy(chromaKeyStrength = str)) }
+        }
     }
     InspectorSlider(if (isBangla) "ব্যাকগ্রাউন্ড ব্লার" else "BG Blur", clip.colorGrade.blurRadius, 0f..20f, "${clip.colorGrade.blurRadius.toInt()}px") { b ->
         onUpdateClip { it.copy(colorGrade = it.colorGrade.copy(blurRadius = b)) }
@@ -985,8 +1114,10 @@ private fun MaskAndBlendInspector(
 @Composable
 private fun AudioMixInspector(
     clip: TimelineClip?,
+    allClips: List<TimelineClip>,
     isBangla: Boolean,
     voiceoverRecorder: VoiceoverRecorder,
+    onSelectAudioTarget: (String) -> Unit,
     onUpdateClip: ((TimelineClip) -> TimelineClip) -> Unit,
     onPickAudioFile: () -> Unit,
     onVoiceoverRecorded: (String, Long) -> Unit
@@ -1031,11 +1162,103 @@ private fun AudioMixInspector(
         LinearProgressIndicator(progress = { liveAmp }, color = CoralAction, trackColor = StudioObsidian, modifier = Modifier.fillMaxWidth().height(6.dp))
     }
 
+    // All Audio Clips Target Selector (Native Video Sound + Voiceover + Music)
+    val audioTargets = remember(allClips) {
+        allClips.filter {
+            it.trackType == TrackType.VOICEOVER ||
+                it.trackType == TrackType.MUSIC ||
+                (it.trackType == TrackType.VIDEO && it.mediaSource?.isVideo == true)
+        }
+    }
+    if (audioTargets.isNotEmpty()) {
+        Text(
+            text = if (isBangla) "সব অডিও ক্লিপ (ভিডিও / ভয়েস / মিউজিক)" else "All Audio Clips",
+            style = MaterialTheme.typography.labelSmall,
+            color = CyanPlayhead
+        )
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            items(audioTargets, key = { it.id }) { target ->
+                val isCurrent = clip?.id == target.id
+                val prefix = when (target.trackType) {
+                    TrackType.VIDEO -> "🎬"
+                    TrackType.VOICEOVER -> "🎙"
+                    else -> "🎵"
+                }
+                val badge = buildString {
+                    if (target.audioConfig.isMuted) append(" [M]")
+                    if (target.audioConfig.isSolo) append(" [S]")
+                }
+                FilterChip(
+                    selected = isCurrent,
+                    onClick = { onSelectAudioTarget(target.id) },
+                    label = {
+                        Text(
+                            "$prefix ${target.title.take(14)}$badge",
+                            style = MaterialTheme.typography.labelSmall,
+                            maxLines = 1
+                        )
+                    },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = CyanPlayhead,
+                        selectedLabelColor = StudioObsidian,
+                        labelColor = TextPrimary
+                    )
+                )
+            }
+        }
+    }
+
     if (clip != null) {
         val ac = clip.audioConfig
-        InspectorSlider(if (isBangla) "ক্লিপ ভলিউম" else "Clip Volume", ac.volume, 0f..1.5f, "${(ac.volume * 100).toInt()}%") { v ->
+        // Per-Clip Mute + Solo Switches
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Surface(
+                onClick = { onUpdateClip { it.copy(audioConfig = ac.copy(isMuted = !ac.isMuted)) } },
+                color = if (ac.isMuted) CoralAction.copy(alpha = 0.22f) else StudioSurfaceElevated,
+                shape = RoundedCornerShape(10.dp),
+                border = BorderStroke(1.dp, if (ac.isMuted) CoralAction else StudioBorder),
+                modifier = Modifier.weight(1f).testTag("audio_mute_toggle")
+            ) {
+                Box(modifier = Modifier.padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
+                    Text(
+                        text = if (ac.isMuted) (if (isBangla) "🔇 মিউট অন" else "Muted") else (if (isBangla) "🔊 মিউট" else "Mute"),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = if (ac.isMuted) CoralAction else TextPrimary
+                    )
+                }
+            }
+            Surface(
+                onClick = { onUpdateClip { it.copy(audioConfig = ac.copy(isSolo = !ac.isSolo)) } },
+                color = if (ac.isSolo) AmberDocumentary.copy(alpha = 0.24f) else StudioSurfaceElevated,
+                shape = RoundedCornerShape(10.dp),
+                border = BorderStroke(1.dp, if (ac.isSolo) AmberDocumentary else StudioBorder),
+                modifier = Modifier.weight(1f).testTag("audio_solo_toggle")
+            ) {
+                Box(modifier = Modifier.padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
+                    Text(
+                        text = if (ac.isSolo) (if (isBangla) "★ সোলো অন" else "Solo ON") else (if (isBangla) "☆ সোলো" else "Solo"),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = if (ac.isSolo) AmberDocumentary else TextPrimary
+                    )
+                }
+            }
+        }
+
+        InspectorSlider(if (isBangla) "ক্লিপ ভলিউম (0%–200%)" else "Clip Volume", ac.volume, 0f..2.0f, "${(ac.volume * 100).toInt()}%") { v ->
             onUpdateClip { it.copy(audioConfig = ac.copy(volume = v)) }
         }
+        InspectorSlider(if (isBangla) "ফেড ইন (Fade In)" else "Fade In", ac.fadeInMs / 1000f, 0f..3.0f, "%.1fs".format(ac.fadeInMs / 1000f)) { s ->
+            onUpdateClip { it.copy(audioConfig = ac.copy(fadeInMs = (s * 1000f).toLong())) }
+        }
+        InspectorSlider(if (isBangla) "ফেড আউট (Fade Out)" else "Fade Out", ac.fadeOutMs / 1000f, 0f..3.0f, "%.1fs".format(ac.fadeOutMs / 1000f)) { s ->
+            onUpdateClip { it.copy(audioConfig = ac.copy(fadeOutMs = (s * 1000f).toLong())) }
+        }
+
         if (clip.trackType == TrackType.MUSIC) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text(if (isBangla) "প্রো অটো-ডাকিং (ভয়েসে BGM কমবে)" else "Auto-Ducking under Voice", style = MaterialTheme.typography.bodySmall, color = EmeraldAudio)

@@ -25,7 +25,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
@@ -33,6 +35,7 @@ import androidx.compose.material.icons.filled.Audiotrack
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.BarChart
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Diamond
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Lock
@@ -41,7 +44,6 @@ import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.TextFields
-import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.ZoomIn
@@ -79,11 +81,11 @@ import com.example.domain.model.TimelineClip
 import com.example.domain.model.TrackLayerState
 import com.example.domain.model.TrackType
 import com.example.ui.theme.AmberDocumentary
+import com.example.ui.theme.CoralAction
 import com.example.ui.theme.CyanPlayhead
 import com.example.ui.theme.EmeraldAudio
 import com.example.ui.theme.StudioBorder
 import com.example.ui.theme.StudioObsidian
-import com.example.ui.theme.StudioSurface
 import com.example.ui.theme.StudioSurfaceElevated
 import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextPrimary
@@ -93,10 +95,14 @@ import com.example.ui.theme.TrackMusicColor
 import com.example.ui.theme.TrackTextColor
 import com.example.ui.theme.TrackVideoColor
 import com.example.ui.theme.TrackVoiceColor
-import com.example.ui.theme.VioletAdjustment
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.math.sin
+
+private data class TimelineLaneRow(
+    val layer: TrackLayerState,
+    val laneIndex: Int
+)
 
 @Composable
 fun MultiTrackTimeline(
@@ -112,7 +118,10 @@ fun MultiTrackTimeline(
     onToggleTrackVisibility: (TrackType) -> Unit,
     onToggleTrackLock: (TrackType) -> Unit,
     onQuickAddTrack: (TrackType) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onMoveClipLane: (clipId: String, delta: Int) -> Unit = { _, _ -> },
+    onDuplicateSequentially: (clipId: String) -> Unit = {},
+    onDuplicateToSubLayer: (clipId: String) -> Unit = {}
 ) {
     var pxPerSecDp by remember { mutableFloatStateOf(46f) }
     val density = LocalDensity.current
@@ -120,6 +129,21 @@ fun MultiTrackTimeline(
     val verticalScroll = rememberScrollState()
     val sortedLayers = remember(project.trackLayers) {
         project.trackLayers.sortedBy { it.order }
+    }
+    val laneRows = remember(sortedLayers, project.clips) {
+        buildList {
+            sortedLayers.forEach { layer ->
+                val maxLane = project.clips
+                    .filter { it.trackType == layer.trackType }
+                    .maxOfOrNull { it.laneIndex } ?: 0
+                for (lane in 0..maxLane.coerceIn(0, 8)) {
+                    add(TimelineLaneRow(layer = layer, laneIndex = lane))
+                }
+            }
+        }
+    }
+    val selectedClip = remember(project.clips, selectedClipId) {
+        project.clips.firstOrNull { it.id == selectedClipId }
     }
     val currentPlayhead by rememberUpdatedState(playheadMs)
     val currentPxPerMs by rememberUpdatedState(pxPerMs)
@@ -131,6 +155,50 @@ fun MultiTrackTimeline(
             .background(Color(0xFF0A0D15))
             .border(1.dp, Color(0xFF1F2638))
     ) {
+        if (selectedClip != null) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFF111725))
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "${selectedClip.title} (L${selectedClip.laneIndex + 1})",
+                    fontSize = 10.sp,
+                    color = AmberDocumentary,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1
+                )
+                TimelineQuickActionChip(
+                    label = if (isBangla) "▲ উপরে" else "▲ Up",
+                    tint = CyanPlayhead,
+                    tag = "clip_lane_up",
+                    onClick = { onMoveClipLane(selectedClip.id, -1) }
+                )
+                TimelineQuickActionChip(
+                    label = if (isBangla) "▼ নিচে" else "▼ Down",
+                    tint = CyanPlayhead,
+                    tag = "clip_lane_down",
+                    onClick = { onMoveClipLane(selectedClip.id, 1) }
+                )
+                TimelineQuickActionChip(
+                    label = if (isBangla) "পাশে কপি" else "Copy Next",
+                    tint = EmeraldAudio,
+                    tag = "clip_copy_next",
+                    onClick = { onDuplicateSequentially(selectedClip.id) }
+                )
+                TimelineQuickActionChip(
+                    label = if (isBangla) "নিচে লেয়ারে কপি" else "Copy Sub-Layer",
+                    tint = AmberDocumentary,
+                    tag = "clip_copy_sublayer",
+                    onClick = { onDuplicateToSubLayer(selectedClip.id) }
+                )
+            }
+        }
+
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
             val sidebarWidthDp = 152.dp
             val timelineViewportWidthDp = (maxWidth - sidebarWidthDp).coerceAtLeast(140.dp)
@@ -216,7 +284,7 @@ fun MultiTrackTimeline(
                         }
                     }
 
-                    // Layer control rows
+                    // Layer + Dynamic Sub-Layer control rows
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -225,18 +293,27 @@ fun MultiTrackTimeline(
                             .padding(vertical = 4.dp, horizontal = 4.dp),
                         verticalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
-                        sortedLayers.forEachIndexed { idx, layer ->
-                            LayerSidebarRow(
-                                layer = layer,
-                                isFirst = idx == 0,
-                                isLast = idx == sortedLayers.lastIndex,
-                                isBangla = isBangla,
-                                onMoveUp = { onMoveTrackOrder(layer.trackType, -1) },
-                                onMoveDown = { onMoveTrackOrder(layer.trackType, 1) },
-                                onToggleVisible = { onToggleTrackVisibility(layer.trackType) },
-                                onToggleLock = { onToggleTrackLock(layer.trackType) },
-                                onQuickAdd = { onQuickAddTrack(layer.trackType) }
-                            )
+                        laneRows.forEach { row ->
+                            val layerIdx = sortedLayers.indexOfFirst { it.trackType == row.layer.trackType }
+                            if (row.laneIndex == 0) {
+                                LayerSidebarRow(
+                                    layer = row.layer,
+                                    isFirst = layerIdx <= 0,
+                                    isLast = layerIdx >= sortedLayers.lastIndex,
+                                    isBangla = isBangla,
+                                    onMoveUp = { onMoveTrackOrder(row.layer.trackType, -1) },
+                                    onMoveDown = { onMoveTrackOrder(row.layer.trackType, 1) },
+                                    onToggleVisible = { onToggleTrackVisibility(row.layer.trackType) },
+                                    onToggleLock = { onToggleTrackLock(row.layer.trackType) },
+                                    onQuickAdd = { onQuickAddTrack(row.layer.trackType) }
+                                )
+                            } else {
+                                SubLayerSidebarRow(
+                                    layer = row.layer,
+                                    laneIndex = row.laneIndex,
+                                    isBangla = isBangla
+                                )
+                            }
                         }
                     }
                 }
@@ -265,7 +342,12 @@ fun MultiTrackTimeline(
                         }
                 ) {
                     Column(modifier = Modifier.fillMaxSize()) {
-                        // Top Timecode Ruler
+                        // Top Timecode Ruler (adapts tick density for up to 10-minute timelines)
+                        val tickStepSec = when {
+                            pxPerSecDp < 18f -> 10
+                            pxPerSecDp < 30f -> 5
+                            else -> 2
+                        }
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -274,7 +356,8 @@ fun MultiTrackTimeline(
                         ) {
                             Canvas(modifier = Modifier.fillMaxSize()) {
                                 val totalSec = (project.totalDurationMs / 1000L).toInt() + 2
-                                for (sec in 0..totalSec) {
+                                val minorStep = if (pxPerSecDp < 20f) 5 else 1
+                                for (sec in 0..totalSec step minorStep) {
                                     val x = scrollOffsetPx + (sec * 1000f * pxPerMs)
                                     if (x in -20f..(size.width + 20f)) {
                                         drawLine(
@@ -284,24 +367,27 @@ fun MultiTrackTimeline(
                                             strokeWidth = 2f
                                         )
                                     }
-                                    val halfX = x + 500f * pxPerMs
-                                    if (halfX in -20f..(size.width + 20f)) {
-                                        drawLine(
-                                            color = TextMuted.copy(alpha = 0.25f),
-                                            start = Offset(halfX, size.height * 0.78f),
-                                            end = Offset(halfX, size.height),
-                                            strokeWidth = 1.2f
-                                        )
+                                    if (minorStep == 1) {
+                                        val halfX = x + 500f * pxPerMs
+                                        if (halfX in -20f..(size.width + 20f)) {
+                                            drawLine(
+                                                color = TextMuted.copy(alpha = 0.25f),
+                                                start = Offset(halfX, size.height * 0.78f),
+                                                end = Offset(halfX, size.height),
+                                                strokeWidth = 1.2f
+                                            )
+                                        }
                                     }
                                 }
                             }
 
                             val totalSec = (project.totalDurationMs / 1000L).toInt() + 1
-                            for (sec in 0..totalSec step 2) {
+                            for (sec in 0..totalSec step tickStepSec) {
                                 val xPx = scrollOffsetPx + (sec * 1000f * pxPerMs)
                                 if (xPx in -40f..(timelineViewportPx + 40f)) {
+                                    val label = if (sec >= 60) "%d:%02d".format(sec / 60, sec % 60) else ":%02d".format(sec)
                                     Text(
-                                        text = ":%02d".format(sec),
+                                        text = label,
                                         fontSize = 10.sp,
                                         color = TextMuted,
                                         modifier = Modifier.offset { IntOffset((xPx + 4).roundToInt(), 5) }
@@ -310,7 +396,7 @@ fun MultiTrackTimeline(
                             }
                         }
 
-                        // Synced Stacked Track Rows
+                        // Synced Stacked Track + Sub-Lane Rows
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -319,11 +405,13 @@ fun MultiTrackTimeline(
                                 .padding(vertical = 4.dp),
                             verticalArrangement = Arrangement.spacedBy(5.dp)
                         ) {
-                            sortedLayers.forEach { layer ->
-                                val clipsOnTrack = project.clips.filter { it.trackType == layer.trackType }
+                            laneRows.forEach { row ->
+                                val clipsInLane = project.clips.filter {
+                                    it.trackType == row.layer.trackType && it.laneIndex == row.laneIndex
+                                }
                                 TimelineTrackClipsRow(
-                                    layer = layer,
-                                    clips = clipsOnTrack,
+                                    layer = row.layer,
+                                    clips = clipsInLane,
                                     allProjectClips = project.clips,
                                     selectedClipId = selectedClipId,
                                     scrollOffsetPx = scrollOffsetPx,
@@ -456,6 +544,63 @@ private fun LayerSidebarRow(
 }
 
 @Composable
+private fun SubLayerSidebarRow(
+    layer: TrackLayerState,
+    laneIndex: Int,
+    isBangla: Boolean
+) {
+    val accent = trackColorFor(layer.trackType)
+    Surface(
+        color = Color(0xFF0E1422),
+        shape = RoundedCornerShape(10.dp),
+        border = BorderStroke(1.dp, accent.copy(alpha = 0.25f)),
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(40.dp)
+            .alpha(if (layer.isVisible) 0.92f else 0.45f)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = if (isBangla) "↳ সাব-লেয়ার ${laneIndex + 1}" else "↳ Lane ${laneIndex + 1}",
+                fontSize = 10.sp,
+                color = accent,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1
+            )
+        }
+    }
+}
+
+@Composable
+private fun TimelineQuickActionChip(
+    label: String,
+    tint: Color,
+    tag: String,
+    onClick: () -> Unit
+) {
+    Surface(
+        onClick = onClick,
+        color = Color(0xFF192236),
+        shape = RoundedCornerShape(8.dp),
+        border = BorderStroke(1.dp, tint.copy(alpha = 0.55f)),
+        modifier = Modifier.testTag(tag)
+    ) {
+        Text(
+            text = label,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = tint,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+        )
+    }
+}
+
+@Composable
 private fun SmallSidebarIconBtn(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     desc: String,
@@ -546,8 +691,10 @@ private fun TimelineTrackClipsRow(
                     }
                     .testTag("timeline_clip_${clip.id}")
             ) {
-                // Waveform & Smooth Auto-Ducking curve for audio tracks
-                if (layer.trackType == TrackType.VOICEOVER || layer.trackType == TrackType.MUSIC) {
+                // Waveform & Smooth Auto-Ducking curve for audio/video tracks
+                if (layer.trackType == TrackType.VOICEOVER || layer.trackType == TrackType.MUSIC ||
+                    (layer.trackType == TrackType.VIDEO && clip.mediaSource?.isVideo == true)
+                ) {
                     val voClips = allProjectClips.filter { it.trackType == TrackType.VOICEOVER && !it.isHidden }
                     Canvas(modifier = Modifier.fillMaxSize()) {
                         val bars = (size.width / 5f).toInt().coerceIn(8, 120)
@@ -560,10 +707,10 @@ private fun TimelineTrackClipsRow(
                                 voClips.any { tMs in (it.startMs - 200L)..(it.endMs + 250L) }
                             val duckMult = if (isDucked) clip.audioConfig.duckingFloor else 1f
                             val wave = (0.28f + 0.62f * abs(sin((i + clip.audioConfig.waveformSeed) * 0.75f))) * duckMult
-                            val barH = size.height * wave * 0.72f
+                            val barH = size.height * wave * (if (clip.audioConfig.isMuted) 0.15f else 0.72f)
                             val x = i * step + step * 0.3f
                             drawLine(
-                                color = Color.White.copy(alpha = if (isDucked) 0.30f else 0.58f),
+                                color = Color.White.copy(alpha = if (clip.audioConfig.isMuted) 0.16f else if (isDucked) 0.30f else 0.55f),
                                 start = Offset(x, (size.height - barH) / 2f),
                                 end = Offset(x, (size.height + barH) / 2f),
                                 strokeWidth = 2f
@@ -577,11 +724,11 @@ private fun TimelineTrackClipsRow(
                     }
                 }
 
-                // Clip title + badges
+                // Clip title + badges (including Mute & Solo)
                 Row(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(horizontal = if (isSelected) 12.dp else 6.dp),
+                        .padding(horizontal = if (isSelected) 18.dp else 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(3.dp)
                 ) {
@@ -594,6 +741,11 @@ private fun TimelineTrackClipsRow(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f, fill = false)
                     )
+                    if (clip.audioConfig.isMuted) {
+                        Icon(Icons.AutoMirrored.Filled.VolumeOff, contentDescription = "Muted", tint = CoralAction, modifier = Modifier.size(10.dp))
+                    } else if (clip.audioConfig.isSolo) {
+                        Text("S", fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, color = CyanPlayhead)
+                    }
                     if (locked) {
                         Icon(Icons.Default.Lock, contentDescription = "Locked", tint = AmberDocumentary, modifier = Modifier.size(10.dp))
                     }
@@ -608,13 +760,13 @@ private fun TimelineTrackClipsRow(
                     }
                 }
 
-                // Left & Right Trim Handles when selected & unlocked!
+                // Left & Right 16.dp Trim Handles (200ms..600_000ms) when selected & unlocked
                 if (isSelected && !locked) {
                     // Left trim bar (adjusts startMs + durationMs)
                     Box(
                         modifier = Modifier
                             .align(Alignment.CenterStart)
-                            .width(11.dp)
+                            .width(16.dp)
                             .fillMaxHeight()
                             .background(AmberDocumentary)
                             .pointerInput(clip.id) {
@@ -631,21 +783,21 @@ private fun TimelineTrackClipsRow(
                                         change.consume()
                                         accum += dragAmount
                                         val deltaMs = (accum / currentPxPerMs).toLong()
-                                        val nextStart = (initStart + deltaMs).coerceIn(0L, initEnd - 500L)
-                                        onTrimClip(latestClip.id, nextStart, initEnd - nextStart)
+                                        val nextStart = (initStart + deltaMs).coerceIn(0L, (initEnd - 200L).coerceAtLeast(0L))
+                                        onTrimClip(latestClip.id, nextStart, (initEnd - nextStart).coerceIn(200L, 600_000L))
                                     }
                                 )
                             },
                         contentAlignment = Alignment.Center
                     ) {
-                        Box(modifier = Modifier.width(2.dp).height(14.dp).background(StudioObsidian, RoundedCornerShape(1.dp)))
+                        Box(modifier = Modifier.width(2.5.dp).height(16.dp).background(StudioObsidian, RoundedCornerShape(1.dp)))
                     }
 
                     // Right trim bar (adjusts durationMs)
                     Box(
                         modifier = Modifier
                             .align(Alignment.CenterEnd)
-                            .width(11.dp)
+                            .width(16.dp)
                             .fillMaxHeight()
                             .background(AmberDocumentary)
                             .pointerInput(clip.id) {
@@ -660,13 +812,13 @@ private fun TimelineTrackClipsRow(
                                         change.consume()
                                         accum += dragAmount
                                         val deltaMs = (accum / currentPxPerMs).toLong()
-                                        onTrimClip(latestClip.id, latestClip.startMs, (initDur + deltaMs).coerceIn(500L, 120_000L))
+                                        onTrimClip(latestClip.id, latestClip.startMs, (initDur + deltaMs).coerceIn(200L, 600_000L))
                                     }
                                 )
                             },
                         contentAlignment = Alignment.Center
                     ) {
-                        Box(modifier = Modifier.width(2.dp).height(14.dp).background(StudioObsidian, RoundedCornerShape(1.dp)))
+                        Box(modifier = Modifier.width(2.5.dp).height(16.dp).background(StudioObsidian, RoundedCornerShape(1.dp)))
                     }
                 }
             }

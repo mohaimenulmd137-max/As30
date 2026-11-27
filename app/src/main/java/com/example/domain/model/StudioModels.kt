@@ -46,7 +46,11 @@ data class TrackLayerState(
 
 enum class KeyframeEasing(val label: String) {
     LINEAR("Linear"),
-    EASE_IN_OUT("Smooth"),
+    EASE_IN("Ease In"),
+    EASE_OUT("Ease Out"),
+    EASE_IN_OUT("Ease In Out"),
+    CUBIC_BEZIER("Cubic Bezier"),
+    CUSTOM_CURVE("Custom Curve"),
     SPRING("Spring"),
     HOLD("Hold")
 }
@@ -59,7 +63,9 @@ data class Keyframe(
     val scale: Float = 1f,
     val rotation: Float = 0f,
     val opacity: Float = 1f,
-    val easing: KeyframeEasing = KeyframeEasing.EASE_IN_OUT
+    val blurRadius: Float = 0f,
+    val easing: KeyframeEasing = KeyframeEasing.EASE_IN_OUT,
+    val customBezier: List<Float> = listOf(0.25f, 0.1f, 0.25f, 1.0f)
 )
 
 enum class AnimationCategory(val labelBn: String, val labelEn: String) {
@@ -68,11 +74,105 @@ enum class AnimationCategory(val labelBn: String, val labelEn: String) {
     LOOP("লুপ (Loop)", "Loop")
 }
 
+enum class AnimationCategoryTab(val labelBn: String, val labelEn: String) {
+    ALL("সব", "All"),
+    IN("ইন", "In"),
+    OUT("আউট", "Out"),
+    LOOP("লুপ", "Loop"),
+    TEXT("টেক্সট", "Text"),
+    IMAGE("ইমেজ", "Image"),
+    VIDEO("ভিডিও", "Video"),
+    CUSTOM("কাস্টম", "Custom")
+}
+
+enum class AnimationMediaScope { TEXT, IMAGE, VIDEO, ALL }
+
+enum class AnimationDirection(val labelBn: String, val labelEn: String) {
+    CENTER("সেন্টার", "Center"),
+    LEFT("বাম", "Left"),
+    RIGHT("ডান", "Right"),
+    TOP("উপর", "Top"),
+    BOTTOM("নিচ", "Bottom"),
+    FORWARD("সামনে", "Forward"),
+    BACKWARD("পিছনে", "Backward")
+}
+
+enum class AnimationEasingType(val label: String) {
+    LINEAR("Linear"),
+    EASE_IN("Ease In"),
+    EASE_OUT("Ease Out"),
+    EASE_IN_OUT("Ease In Out"),
+    CUBIC_BEZIER("Cubic Bezier"),
+    CUSTOM_CURVE("Custom Curve")
+}
+
+data class AnimationSlotConfig(
+    val animationId: String,
+    val enabled: Boolean = true,
+    val durationMs: Long = 700L,
+    val delayMs: Long = 0L,
+    val speed: Float = 1.0f,
+    val intensity: Float = 1.0f,
+    val direction: AnimationDirection = AnimationDirection.CENTER,
+    val repeatCount: Int = 1,
+    val startOffsetMs: Long = 0L,
+    val endOffsetMs: Long = 0L,
+    val easing: AnimationEasingType = AnimationEasingType.EASE_OUT,
+    val bezierX1: Float = 0.25f,
+    val bezierY1: Float = 0.1f,
+    val bezierX2: Float = 0.25f,
+    val bezierY2: Float = 1.0f
+)
+
+data class ClipAnimationProfile(
+    val inSlot: AnimationSlotConfig = AnimationSlotConfig(animationId = "in_fade", enabled = true),
+    val loopSlot: AnimationSlotConfig = AnimationSlotConfig(animationId = "loop_none", enabled = false, durationMs = 2000L, repeatCount = 0),
+    val outSlot: AnimationSlotConfig = AnimationSlotConfig(animationId = "out_fade", enabled = true),
+    val blurRadius: Float = 0f,
+    val shadowStrength: Float = 0f,
+    val skewX: Float = 0f,
+    val skewY: Float = 0f,
+    val perspective: Float = 0f,
+    val anchorX: Float = 0.5f,
+    val anchorY: Float = 0.5f
+)
+
+data class UserAnimationPreset(
+    val id: String = UUID.randomUUID().toString(),
+    val name: String,
+    val profile: ClipAnimationProfile,
+    val createdAt: Long = System.currentTimeMillis()
+)
+
 data class MotionAnimationSpec(
     val id: String,
     val name: String,
     val nameBn: String,
-    val category: AnimationCategory
+    val category: AnimationCategory,
+    val scope: AnimationMediaScope = AnimationMediaScope.ALL
+)
+
+enum class BorderShapeStyle(val labelBn: String, val labelEn: String) {
+    NONE("বর্ডার নেই", "None"),
+    RECT_SOLID("সলিড ফ্রেম", "Solid Frame"),
+    ROUNDED_CINEMA("রাউন্ডেড সিনেমা", "Rounded Cinema"),
+    DOUBLE_FRAME("ডাবল বর্ডার", "Double Frame"),
+    TECH_BRACKETS("স্ক্যানার কর্নার", "Tech Brackets"),
+    CHAMFERED_OCTAGON("অক্টাগন কাট", "Octagon Cut"),
+    DIAMOND_FRAME("ডায়মন্ড শেপ", "Diamond Frame"),
+    HEXAGON_FRAME("ষড়ভুজ শেপ", "Hexagon Frame"),
+    CIRCLE_PORTRAIT("বৃত্তাকার ফ্রেম", "Circle Frame"),
+    NEON_DASHED("নিয়ন ড্যাশড", "Neon Dashed")
+}
+
+data class BorderConfig(
+    val style: BorderShapeStyle = BorderShapeStyle.NONE,
+    val thicknessDp: Float = 4f,
+    val colorHex: Long = 0xFFFFB300,
+    val secondaryColorHex: Long = 0xFF00E5FF,
+    val glowRadius: Float = 8f,
+    val cornerRadiusDp: Float = 16f,
+    val insetPercent: Float = 0.03f
 )
 
 enum class SfxCategory(val label: String) {
@@ -124,7 +224,10 @@ enum class VfxEffectType(val labelBn: String, val labelEn: String) {
     EMBERS_SPARK("ফায়ার এমবার পার্টিকেল", "Fire Embers"),
     CAMERA_SHAKE("হলিউড ক্যামেরা শেক", "Action Shake"),
     LIGHT_LEAK("ভিন্টেজ লাইট লিক", "Light Leak"),
-    LETTERBOX_239("২.৩৯:১ হলিউড বার", "2.39:1 Cinema Bars")
+    LETTERBOX_239("২.৩৯:১ হলিউড বার", "2.39:1 Cinema Bars"),
+    VOLUMETRIC_GOD_RAYS("ভলিউমেট্রিক গড-রে", "God Rays"),
+    GOLD_DUST_BOKEH("সিনেমা গোল্ড বোকেহ", "Cinema Bokeh"),
+    DREAMY_HALATION("ড্রিমি হ্যালো গ্লো", "Cinema Halation")
 }
 
 data class VfxConfig(
@@ -140,7 +243,10 @@ enum class TransitionType(val labelBn: String, val labelEn: String) {
     ZOOM_THROUGH("জুম থ্রু", "Zoom Through"),
     GLITCH_CUT("গ্লিচ কাট", "Glitch Cut"),
     FILM_BURN("ফিল্ম বার্ন", "Film Burn"),
-    IRIS_WIPE("আইরিস ওয়াইপ", "Iris Wipe")
+    IRIS_WIPE("আইরিস ওয়াইপ", "Iris Wipe"),
+    SLIDE_WARP("স্লাইড ওয়ার্প", "Slide Warp"),
+    LUMA_DISSOLVE("লুমা ডিজলভ", "Luma Dissolve"),
+    SPIN_FLASH("স্পিন ফ্ল্যাশ", "Spin Flash")
 }
 
 data class SpeedPoint(
@@ -200,17 +306,37 @@ data class ChartBarItem(
     val colorHex: Long
 )
 
+enum class ChartPaletteTheme(val labelBn: String, val labelEn: String, val colors: List<Long>) {
+    DEFAULT_MIX("মাল্টি-সিনেমা", "Multi Cinema", listOf(0xFF00E5FF, 0xFFFFB300, 0xFF2CE59B, 0xFFA77BFF, 0xFFFF4D6D, 0xFF38BDF8)),
+    DOC_GOLD("ডকুমেন্টারি গোল্ড", "Doc Gold", listOf(0xFFFFD54F, 0xFFFFB300, 0xFFFF8F00, 0xFFFDE047, 0xFFF59E0B, 0xFFD97706)),
+    CYBER_CYAN("সাইবার নিয়ন", "Cyber Cyan", listOf(0xFF00E5FF, 0xFF38BDF8, 0xFF818CF8, 0xFFA77BFF, 0xFF22D3EE, 0xFF0EA5E9)),
+    CRIMSON_ALERT("ইনভেস্টিগেটিভ রেড", "Crimson Alert", listOf(0xFFFF4D6D, 0xFFFB7185, 0xFFF43F5E, 0xFFFF7A00, 0xFFEF4444, 0xFFE11D48)),
+    EMERALD_GROWTH("গ্রোথ গ্রিন", "Emerald Growth", listOf(0xFF2CE59B, 0xFF34D399, 0xFF10B981, 0xFF4ADE80, 0xFF00E5FF, 0xFF22C55E))
+}
+
+enum class ChartVisualStyle(val labelBn: String, val labelEn: String) {
+    HORIZONTAL_BAR("হরাইজন্টাল বার", "Horizontal Bar"),
+    VERTICAL_BAR("ভার্টিক্যাল কলাম", "Vertical Bar"),
+    PIE_CIRCLE("গোল পাই চার্ট", "Pie Chart"),
+    DONUT_RING("ডোনাট রিং চার্ট", "Donut Ring"),
+    LINE_GRAPH("দাগ / লাইন গ্রাফ", "Line Graph"),
+    AREA_WAVE("ওয়েভ / এরিয়া গ্রাফ", "Area Wave"),
+    RADAR_WEB("স্পাইডার / রেডার গ্রাফ", "Radar Web")
+}
+
 data class ComparisonChartConfig(
     val title: String = "তুলনামূলক ডেটা চার্ট",
     val unitSuffix: String = "%",
-    val barCount: Int = 8, // 2..60 bars customizable
+    val barCount: Int = 0, // 0..100 items customizable from zero
+    val chartStyle: ChartVisualStyle = ChartVisualStyle.HORIZONTAL_BAR,
     val isHorizontal: Boolean = true,
     val sortDescending: Boolean = true,
     val animateGrowth: Boolean = true,
+    val paletteTheme: ChartPaletteTheme = ChartPaletteTheme.DEFAULT_MIX,
     val bars: List<ChartBarItem> = emptyList()
 )
 
-// Multi-Photo / Multi-Video Comparison Collage (2-4 Slots) with Geometric Shapes
+// Legacy optional data structure retained strictly for backward project DB migration safety
 data class ComparisonSlot(
     val id: String = UUID.randomUUID().toString(),
     val caption: String,
@@ -221,7 +347,7 @@ data class ComparisonSlot(
 
 data class ComparisonGridConfig(
     val title: String = "তুলনামূলক বিশ্লেষণ",
-    val slotCount: Int = 3, // 2, 3, or 4 slots
+    val slotCount: Int = 3,
     val spacingDp: Float = 8f,
     val slots: List<ComparisonSlot> = emptyList()
 )
@@ -236,12 +362,36 @@ enum class InvestigativeToolType(val labelBn: String, val labelEn: String) {
     STAT_YEAR_COUNTER("সাল / সংখ্যা কাউন্টার", "Stat / Year Counter")
 }
 
+enum class MapRadarStyle(
+    val labelBn: String,
+    val labelEn: String,
+    val bgHex: Long,
+    val gridHex: Long,
+    val routeHex: Long,
+    val markerHex: Long
+) {
+    TACTICAL_DARK("ট্যাকটিক্যাল রাডার", "Tactical Radar", 0xDD08101C, 0xFF00E5FF, 0xFFFFB300, 0xFF00E5FF),
+    SATELLITE_GRID("স্যাটেলাইট স্লেট", "Satellite Grid", 0xDD0D1614, 0xFF2CE59B, 0xFF2CE59B, 0xFFFFD54F),
+    HIGHWAY_AMBER("আর্কাইভ অ্যাম্বার", "Archive Amber", 0xDD171109, 0xFFFFB300, 0xFFFF7A00, 0xFFFDE047),
+    MARITIME_NAVAL("মেরিটাইম নেভি", "Maritime Naval", 0xDD061326, 0xFF38BDF8, 0xFFF472B6, 0xFF00E5FF)
+}
+
 data class InvestigativeDocConfig(
     val toolType: InvestigativeToolType = InvestigativeToolType.NONE,
     val headline: String = "গোপন নথি · ১৯৭১",
     val bodyText: String = "তদন্তে পাওয়া মূল তথ্য এখানে হাইলাইট হবে",
     val pointALabel: String = "ঢাকা",
     val pointBLabel: String = "কলকাতা",
+    val pointAX: Float = 0.22f,
+    val pointAY: Float = 0.68f,
+    val pointBX: Float = 0.78f,
+    val pointBY: Float = 0.34f,
+    val pointCLabel: String = "",
+    val pointCX: Float = 0.50f,
+    val pointCY: Float = 0.24f,
+    val useWaypointC: Boolean = false,
+    val distanceLabel: String = "২৬৫ কি.মি.",
+    val mapStyle: MapRadarStyle = MapRadarStyle.TACTICAL_DARK,
     val counterStart: Int = 1971,
     val counterEnd: Int = 2026,
     val counterPrefix: String = "",
@@ -369,7 +519,10 @@ data class AudioConfig(
     val duckingFloor: Float = 0.22f,
     val noiseReductionEnabled: Boolean = false,
     val audioPath: String? = null,
-    val waveformSeed: Int = 7
+    val waveformSeed: Int = 7,
+    val isMuted: Boolean = false,
+    val isSolo: Boolean = false,
+    val pan: Float = 0f
 )
 
 data class MediaSource(
@@ -382,6 +535,7 @@ data class MediaSource(
 data class TimelineClip(
     val id: String = UUID.randomUUID().toString(),
     val trackType: TrackType,
+    val laneIndex: Int = 0,
     val title: String,
     val startMs: Long,
     val durationMs: Long,
@@ -396,12 +550,17 @@ data class TimelineClip(
     val inAnimationId: String = "in_fade",
     val outAnimationId: String = "out_fade",
     val loopAnimationId: String = "loop_none",
+    val animationProfile: ClipAnimationProfile = ClipAnimationProfile(),
     val transitionIn: TransitionType = TransitionType.NONE,
+    val transitionOut: TransitionType = TransitionType.NONE,
+    val transitionInDurationMs: Long = 650L,
+    val transitionOutDurationMs: Long = 650L,
     val lockedSfxId: String? = null,
     val colorGrade: LumetriColorGrade = LumetriColorGrade(),
     val vfxConfig: VfxConfig? = null,
     val speedRamp: SpeedRampProfile = SpeedRampProfile(),
     val maskConfig: MaskConfig = MaskConfig(),
+    val borderConfig: BorderConfig = BorderConfig(),
     val blendMode: BlendModeOption = BlendModeOption.NORMAL,
     val textConfig: TextLayerConfig? = null,
     val chartConfig: ComparisonChartConfig? = null,

@@ -3,7 +3,14 @@ package com.example
 import com.example.domain.engine.AudioSynthEngine
 import com.example.domain.engine.KeyframeInterpolator
 import com.example.domain.engine.SpeedRampEngine
+import com.example.domain.model.AnimationCategory
+import com.example.domain.model.AnimationDirection
+import com.example.domain.model.AnimationEasingType
+import com.example.domain.model.AnimationMediaScope
+import com.example.domain.model.AnimationSlotConfig
 import com.example.domain.model.AudioConfig
+import com.example.domain.model.BorderShapeStyle
+import com.example.domain.model.ClipAnimationProfile
 import com.example.domain.model.GeometricShape
 import com.example.domain.model.Keyframe
 import com.example.domain.model.KeyframeEasing
@@ -93,11 +100,11 @@ class StudioEnginesTest {
     }
 
     @Test
-    fun `auto investigative documentary builder populates VFX, charts, comparison grid, and track layers`() {
+    fun `auto investigative documentary builder populates VFX, charts, geometric border frame, and track layers`() {
         val doc = PresetCatalog.buildAutoInvestigativeDocumentary("Test Doc", "Key Finding")
         assertTrue(doc.clips.any { it.vfxConfig?.effectType == VfxEffectType.FILM_GRAIN })
         assertTrue(doc.clips.any { it.chartConfig != null })
-        assertTrue(doc.clips.any { it.comparisonGrid?.slotCount == 3 })
+        assertTrue(doc.clips.any { it.borderConfig.style == BorderShapeStyle.HEXAGON_FRAME && it.laneIndex == 1 })
         assertTrue(doc.clips.any { it.investigativeConfig != null })
         assertEquals(TrackType.entries.size, doc.trackLayers.size)
     }
@@ -120,5 +127,234 @@ class StudioEnginesTest {
         assertEquals(gold.gradientEndHex, styled.gradientEndHex)
         assertEquals(gold.strokeWidthPx, styled.strokeWidthPx, 0.01f)
         assertEquals("/tmp/my_custom.ttf", styled.customFontPath)
+    }
+
+    @Test
+    fun `transition engine evaluates dissolve, whip pan, zoom through, iris wipe, and film burn`() {
+        val dissolveClip = TimelineClip(
+            trackType = TrackType.VIDEO,
+            title = "Dissolve",
+            startMs = 1000L,
+            durationMs = 4000L,
+            transitionIn = com.example.domain.model.TransitionType.CROSS_DISSOLVE
+        )
+        val atStart = com.example.domain.engine.TransitionAndChromaEngine.evaluateTransition(dissolveClip, 1000L)
+        val afterWin = com.example.domain.engine.TransitionAndChromaEngine.evaluateTransition(dissolveClip, 1900L)
+        assertEquals(0f, atStart.alphaMult, 0.01f)
+        assertEquals(1f, afterWin.alphaMult, 0.01f)
+
+        val whipClip = dissolveClip.copy(transitionIn = com.example.domain.model.TransitionType.WHIP_PAN)
+        val whipStart = com.example.domain.engine.TransitionAndChromaEngine.evaluateTransition(whipClip, 1000L)
+        assertEquals(0.85f, whipStart.offsetXNorm, 0.02f)
+
+        val irisClip = dissolveClip.copy(transitionIn = com.example.domain.model.TransitionType.IRIS_WIPE)
+        val irisMid = com.example.domain.engine.TransitionAndChromaEngine.evaluateTransition(irisClip, 1325L)
+        assertTrue(irisMid.irisRadiusFrac in 0.1f..0.95f)
+
+        val burnClip = dissolveClip.copy(transitionIn = com.example.domain.model.TransitionType.FILM_BURN)
+        val burnMid = com.example.domain.engine.TransitionAndChromaEngine.evaluateTransition(burnClip, 1325L)
+        assertTrue(burnMid.isWarmFlash && burnMid.flashAlpha > 0.3f)
+    }
+
+    @Test
+    fun `chroma key alpha math keys pure green to transparent and keeps red subject opaque`() {
+        val pureGreenAlpha = com.example.domain.engine.TransitionAndChromaEngine.computeChromaAlpha(20, 240, 30, 0.55f)
+        val redSubjectAlpha = com.example.domain.engine.TransitionAndChromaEngine.computeChromaAlpha(220, 40, 45, 0.55f)
+        assertEquals(0, pureGreenAlpha)
+        assertEquals(255, redSubjectAlpha)
+    }
+
+    @Test
+    fun `animation library contains full Text, Image, Video, In, Out, and Loop presets`() {
+        val textAnims = PresetCatalog.motionAnimations.filter { it.scope == AnimationMediaScope.TEXT }
+        val imageAnims = PresetCatalog.motionAnimations.filter { it.scope == AnimationMediaScope.IMAGE }
+        val videoAnims = PresetCatalog.motionAnimations.filter { it.scope == AnimationMediaScope.VIDEO }
+        val loopAnims = PresetCatalog.motionAnimations.filter { it.category == AnimationCategory.LOOP }
+
+        assertTrue(textAnims.size >= 13)
+        assertTrue(imageAnims.size >= 11)
+        assertTrue(videoAnims.size >= 9)
+        assertTrue(loopAnims.size >= 12)
+        assertTrue(PresetCatalog.motionAnimations.any { it.id == "text_typewriter" })
+        assertTrue(PresetCatalog.motionAnimations.any { it.id == "img_pan_left" })
+        assertTrue(PresetCatalog.motionAnimations.any { it.id == "vid_speed_ramp" })
+        assertTrue(PresetCatalog.motionAnimations.any { it.id == "loop_pendulum" })
+    }
+
+    @Test
+    fun `keyframe interpolator runs simultaneous In, Loop, and Out slots, respects direction, bezier, and bypass`() {
+        val profile = ClipAnimationProfile(
+            inSlot = AnimationSlotConfig(
+                animationId = "text_typewriter",
+                enabled = true,
+                durationMs = 1000L,
+                direction = AnimationDirection.RIGHT,
+                easing = AnimationEasingType.CUBIC_BEZIER,
+                bezierX1 = 0.2f,
+                bezierY1 = 0.8f,
+                bezierX2 = 0.4f,
+                bezierY2 = 1.0f
+            ),
+            loopSlot = AnimationSlotConfig(
+                animationId = "loop_float",
+                enabled = true,
+                durationMs = 1000L,
+                intensity = 1.5f
+            ),
+            outSlot = AnimationSlotConfig(
+                animationId = "out_fade",
+                enabled = true,
+                durationMs = 1000L
+            ),
+            skewX = 0.15f,
+            anchorX = 0.25f
+        )
+        val clip = TimelineClip(
+            trackType = TrackType.TEXT,
+            title = "Simultaneous",
+            startMs = 0L,
+            durationMs = 5000L,
+            animationProfile = profile
+        )
+
+        val midIn = KeyframeInterpolator.evaluate(clip, 500L)
+        assertTrue(midIn.textRevealFraction in 0.1f..0.95f)
+        assertEquals(0.15f, midIn.skewX, 0.01f)
+        assertEquals(0.25f, midIn.anchorX, 0.01f)
+
+        val midOut = KeyframeInterpolator.evaluate(clip, 4750L)
+        assertTrue(midOut.opacity < 0.7f)
+
+        val bypassed = KeyframeInterpolator.evaluate(clip, 500L, bypassAnimations = true)
+        assertEquals(1f, bypassed.textRevealFraction, 0.001f)
+        assertEquals(1f, bypassed.opacity, 0.001f)
+    }
+
+    @Test
+    fun `audio gain enforces per-clip Mute, Solo, and 2x boost`() {
+        val voice = TimelineClip(
+            trackType = TrackType.VOICEOVER,
+            title = "VO",
+            startMs = 0L,
+            durationMs = 5000L,
+            audioConfig = AudioConfig(volume = 2.0f, fadeInMs = 0L, fadeOutMs = 0L, isSolo = true)
+        )
+        val videoAudio = TimelineClip(
+            trackType = TrackType.VIDEO,
+            title = "Main Video",
+            startMs = 0L,
+            durationMs = 5000L,
+            audioConfig = AudioConfig(volume = 1.0f, fadeInMs = 0L, fadeOutMs = 0L, isSolo = false)
+        )
+        val mutedVoice = voice.copy(audioConfig = voice.audioConfig.copy(isMuted = true))
+
+        val projectWithSolo = StudioProject(name = "Solo", masterVolume = 1.0f, clips = listOf(voice, videoAudio))
+        assertEquals(2.0f, AudioSynthEngine.computeEffectiveAudioGain(voice, projectWithSolo, 1000L), 0.02f)
+        assertEquals(0f, AudioSynthEngine.computeEffectiveAudioGain(videoAudio, projectWithSolo, 1000L), 0.001f)
+
+        val projectWithMute = StudioProject(name = "Mute", masterVolume = 1.0f, clips = listOf(mutedVoice, videoAudio))
+        assertEquals(0f, AudioSynthEngine.computeEffectiveAudioGain(mutedVoice, projectWithMute, 1000L), 0.001f)
+    }
+
+    @Test
+    fun `transition engine supports dual Start and End transitions with custom durations and new cinema effects`() {
+        val clip = TimelineClip(
+            trackType = TrackType.VIDEO,
+            title = "Dual Trans",
+            startMs = 1000L,
+            durationMs = 5000L,
+            transitionIn = com.example.domain.model.TransitionType.SLIDE_WARP,
+            transitionInDurationMs = 1000L,
+            transitionOut = com.example.domain.model.TransitionType.SPIN_FLASH,
+            transitionOutDurationMs = 1200L
+        )
+        // Start of clip -> SLIDE_WARP shifts vertically & dims alpha
+        val startState = com.example.domain.engine.TransitionAndChromaEngine.evaluateTransition(clip, 1100L)
+        assertTrue(kotlin.math.abs(startState.offsetYNorm) > 0.1f)
+        assertTrue(startState.alphaMult in 0.05f..0.95f)
+
+        // Middle of clip -> neutral
+        val midState = com.example.domain.engine.TransitionAndChromaEngine.evaluateTransition(clip, 3000L)
+        assertEquals(1f, midState.alphaMult, 0.01f)
+        assertEquals(0f, midState.rotationDeg, 0.01f)
+
+        // End window of clip (within last 1200ms -> 4800..6000) -> SPIN_FLASH rotates and flashes
+        val endState = com.example.domain.engine.TransitionAndChromaEngine.evaluateTransition(clip, 5600L)
+        assertTrue(kotlin.math.abs(endState.rotationDeg) > 1f)
+        assertTrue(endState.alphaMult < 0.9f)
+
+        // LUMA_DISSOLVE check
+        val lumaClip = clip.copy(transitionIn = com.example.domain.model.TransitionType.LUMA_DISSOLVE, transitionOut = com.example.domain.model.TransitionType.NONE)
+        val lumaMid = com.example.domain.engine.TransitionAndChromaEngine.evaluateTransition(lumaClip, 1500L)
+        assertTrue(lumaMid.alphaMult in 0.1f..0.95f)
+    }
+
+    @Test
+    fun `hi-fi sfx synth produces non-zero balanced organic pcm for all 6 sfx categories`() {
+        com.example.domain.model.SfxCategory.entries.forEach { category ->
+            val preset = PresetCatalog.sfxPresets.first { it.category == category }
+            val pcm = AudioSynthEngine.generateSfxPcm(preset, 0.9f)
+            assertTrue("Expected >= 1024 samples for $category", pcm.size >= 1024)
+            val peak = pcm.maxOf { kotlin.math.abs(it.toInt()) }
+            assertTrue("Expected audible peak for $category", peak > 500)
+            assertTrue("Expected non-clipping peak for $category", peak <= Short.MAX_VALUE)
+            val mean = pcm.map { it.toDouble() }.average()
+            assertTrue("Expected low DC bias for $category, got $mean", kotlin.math.abs(mean) < 600.0)
+        }
+    }
+
+    @Test
+    fun `comparison chart starts from zero by default and supports all 7 graph visual styles`() {
+        val zeroChart = com.example.domain.model.ComparisonChartConfig()
+        assertEquals(0, zeroChart.barCount)
+        assertTrue(zeroChart.bars.isEmpty())
+        assertEquals(com.example.domain.model.ChartVisualStyle.HORIZONTAL_BAR, zeroChart.chartStyle)
+        assertEquals(7, com.example.domain.model.ChartVisualStyle.entries.size)
+        assertTrue(com.example.domain.model.ChartVisualStyle.entries.contains(com.example.domain.model.ChartVisualStyle.PIE_CIRCLE))
+        assertTrue(com.example.domain.model.ChartVisualStyle.entries.contains(com.example.domain.model.ChartVisualStyle.DONUT_RING))
+        assertTrue(com.example.domain.model.ChartVisualStyle.entries.contains(com.example.domain.model.ChartVisualStyle.LINE_GRAPH))
+        assertTrue(com.example.domain.model.ChartVisualStyle.entries.contains(com.example.domain.model.ChartVisualStyle.AREA_WAVE))
+        assertTrue(com.example.domain.model.ChartVisualStyle.entries.contains(com.example.domain.model.ChartVisualStyle.RADAR_WEB))
+    }
+
+    @Test
+    fun `computeTotalDurationMs respects short clips and avoids forced 8s padding`() {
+        val emptyDur = com.example.ui.editor.EditorViewModel.computeTotalDurationMs(emptyList())
+        assertEquals(8_000L, emptyDur)
+
+        val shortClip = TimelineClip(
+            trackType = TrackType.VIDEO,
+            title = "Short Reel",
+            startMs = 0L,
+            durationMs = 3_200L
+        )
+        assertEquals(3_200L, com.example.ui.editor.EditorViewModel.computeTotalDurationMs(listOf(shortClip)))
+    }
+
+    @Test
+    fun `audio fingerprint stays identical on text edits and updates on audio config changes`() {
+        val music = TimelineClip(
+            trackType = TrackType.MUSIC,
+            title = "BGM",
+            startMs = 0L,
+            durationMs = 5_000L,
+            audioConfig = AudioConfig(volume = 0.8f)
+        )
+        val text = TimelineClip(
+            trackType = TrackType.TEXT,
+            title = "Title",
+            startMs = 0L,
+            durationMs = 3_000L
+        )
+        val base = StudioProject(name = "FP", totalDurationMs = 5_000L, clips = listOf(music, text))
+        val textEdited = base.copy(clips = listOf(music, text.copy(title = "Changed Title", posX = 0.3f)))
+        val audioEdited = base.copy(clips = listOf(music.copy(audioConfig = music.audioConfig.copy(isMuted = true)), text))
+
+        val fpBase = com.example.domain.engine.AudioExportMixer.buildAudioFingerprint(base)
+        val fpText = com.example.domain.engine.AudioExportMixer.buildAudioFingerprint(textEdited)
+        val fpAudio = com.example.domain.engine.AudioExportMixer.buildAudioFingerprint(audioEdited)
+
+        assertEquals(fpBase, fpText)
+        assertTrue(fpBase != fpAudio)
     }
 }
