@@ -51,6 +51,9 @@ object AudioExportMixer {
                     .append(clip.trackType.name).append(',')
                     .append(clip.startMs).append(',')
                     .append(clip.durationMs).append(',')
+                    .append(clip.trimStartMs).append(',')
+                    .append(clip.sourceDurationMs).append(',')
+                    .append(clip.playbackSpeed).append(',')
                     .append(clip.lockedSfxId ?: "").append(',')
                     .append(clip.mediaSource?.uriString ?: "").append(',')
                     .append(clip.audioConfig.audioPath ?: "").append(',')
@@ -69,11 +72,11 @@ object AudioExportMixer {
     }
 
     /**
-     * Mixes Voiceover clips, Auto-Ducked Music clips, and Locked SFX across the project timeline
-     * into a 44.1 kHz Mono 16-bit PCM array with smooth Auto-Ducking and soft limiting.
+     * Mixes Video audio + Voiceover clips, Auto-Ducked Music clips, and Locked SFX across the project timeline
+     * into a 44.1 kHz Mono 16-bit PCM array honoring trimStartMs, playbackSpeed, Auto-Ducking, and soft limiting.
      */
     fun mixProjectAudioPcm(context: Context, project: StudioProject): ShortArray {
-        val totalDurationMs = project.totalDurationMs.coerceIn(1000L, 600_000L)
+        val totalDurationMs = project.totalDurationMs.coerceIn(1000L, MediaProbeHelper.MAX_TIMELINE_DURATION_MS)
         val totalSamples = ((totalDurationMs * SAMPLE_RATE) / 1000L).toInt().coerceAtLeast(SAMPLE_RATE)
         val mixBuffer = FloatArray(totalSamples)
 
@@ -87,21 +90,35 @@ object AudioExportMixer {
             it.trackType == TrackType.VIDEO || it.trackType == TrackType.VOICEOVER || it.trackType == TrackType.MUSIC
         }.forEach { clip ->
             val clipSamplesCount = ((clip.durationMs * SAMPLE_RATE) / 1000L).toInt().coerceAtLeast(1)
+            val speed = clip.playbackSpeed.coerceIn(0.25f, 4.0f)
+            val neededSourceMs = if (clip.trackType == TrackType.MUSIC) {
+                (clip.sourceDurationMs.takeIf { it > 0L } ?: (clip.durationMs * speed).toLong()).coerceAtLeast(1000L)
+            } else {
+                (clip.durationMs * speed).toLong().coerceAtLeast(200L)
+            }
+            val maxSourceSamples = ((neededSourceMs * SAMPLE_RATE) / 1000L).toInt().coerceAtLeast(1)
             val resolvedAudioSource = clip.audioConfig.audioPath
                 ?: if (clip.trackType == TrackType.VIDEO && clip.mediaSource?.isVideo == true) clip.mediaSource.uriString else null
 
-            val sourcePcm = decodeClipAudio(context, resolvedAudioSource, clipSamplesCount)
-                ?: if (clip.trackType == TrackType.MUSIC) {
-                    generateAmbientCinemaPad(clipSamplesCount, clip.audioConfig.waveformSeed)
-                } else {
-                    null
-                }
+            val sourcePcm = decodeClipAudio(
+                context = context,
+                pathOrUri = resolvedAudioSource,
+                trimStartMs = clip.trimStartMs.coerceAtLeast(0L),
+                maxSamples = maxSourceSamples
+            ) ?: if (clip.trackType == TrackType.MUSIC) {
+                generateAmbientCinemaPad(min(clipSamplesCount, SAMPLE_RATE * 60), clip.audioConfig.waveformSeed)
+            } else {
+                null
+            }
 
             if (sourcePcm != null && sourcePcm.isNotEmpty()) {
                 val startSample = ((clip.startMs * SAMPLE_RATE) / 1000L).toInt().coerceAtLeast(0)
-                val endSample = min(totalSamples, startSample + min(clipSamplesCount, sourcePcm.size.let {
-                    if (clip.trackType == TrackType.MUSIC) clipSamplesCount else maxOf(it, clipSamplesCount)
-                }))
+                val maxPlayableSamples = if (clip.trackType == TrackType.MUSIC) {
+                    clipSamplesCount
+                } else {
+                    min(clipSamplesCount, (sourcePcm.size / speed).toInt().coerceAtLeast(1))
+                }
+                val endSample = min(totalSamples, startSample + maxPlayableSamples)
                 val blockSize = 256
                 var idx = startSample
                 while (idx < endSample) {
@@ -114,10 +131,11 @@ object AudioExportMixer {
 
                     for (s in idx until blockEnd) {
                         val rel = s - startSample
+                        val srcIndex = (rel * speed).toInt()
                         val srcSample = if (clip.trackType == TrackType.MUSIC) {
-                            sourcePcm[rel % sourcePcm.size]
+                            sourcePcm[srcIndex % sourcePcm.size]
                         } else {
-                            if (rel < sourcePcm.size) sourcePcm[rel] else 0
+                            if (srcIndex in sourcePcm.indices) sourcePcm[srcIndex] else 0
                         }
                         val frac = (s - idx).toFloat() / blockSpan
                         val gain = gainStart + (gainEnd - gainStart) * frac
@@ -253,37 +271,54 @@ object AudioExportMixer {
         }
     }
 
-    private fun decodeClipAudio(context: Context, pathOrUri: String?, maxSamples: Int): ShortArray? {
+    private fun decodeClipAudio(
+        context: Context,
+        pathOrUri: String?,
+        trimStartMs: Long,
+        maxSamples: Int
+    ): ShortArray? {
         if (pathOrUri.isNullOrBlank()) return null
         if (pathOrUri.endsWith(".wav", ignoreCase = true) && !pathOrUri.startsWith("content://")) {
             val wavFile = File(pathOrUri)
             if (wavFile.exists() && wavFile.length() > 44L) {
-                return readWavPcm(wavFile, maxSamples)
+                return readWavPcm(wavFile, trimStartMs, maxSamples)
             }
         }
-        return decodeViaMediaExtractor(context, pathOrUri, maxSamples)
+        return decodeViaMediaExtractor(context, pathOrUri, trimStartMs, maxSamples)
     }
 
-    private fun readWavPcm(file: File, maxSamples: Int): ShortArray? {
+    private fun readWavPcm(file: File, trimStartMs: Long, maxSamples: Int): ShortArray? {
         return runCatching {
             FileInputStream(file).use { fis ->
-                fis.skip(44L)
-                val bytes = fis.readBytes()
-                val sampleCount = min(bytes.size / 2, maxSamples)
+                val skipSamples = ((trimStartMs.coerceAtLeast(0L) * SAMPLE_RATE) / 1000L)
+                fis.skip(44L + skipSamples * 2L)
+                val bytesToRead = min(maxSamples * 2, (file.length() - 44L - skipSamples * 2L).coerceAtLeast(0L).toInt())
+                if (bytesToRead <= 1) return@use ShortArray(0)
+                val bytes = ByteArray(bytesToRead)
+                var readTotal = 0
+                while (readTotal < bytesToRead) {
+                    val r = fis.read(bytes, readTotal, bytesToRead - readTotal)
+                    if (r <= 0) break
+                    readTotal += r
+                }
+                val sampleCount = readTotal / 2
                 val bb = ByteBuffer.wrap(bytes, 0, sampleCount * 2).order(ByteOrder.LITTLE_ENDIAN)
                 ShortArray(sampleCount) { bb.short }
             }
         }.getOrNull()
     }
 
-    private fun decodeViaMediaExtractor(context: Context, pathOrUri: String, maxSamples: Int): ShortArray? {
+    private fun decodeViaMediaExtractor(
+        context: Context,
+        pathOrUri: String,
+        trimStartMs: Long,
+        maxSamples: Int
+    ): ShortArray? {
         val extractor = MediaExtractor()
         var codec: MediaCodec? = null
         return try {
-            if (pathOrUri.startsWith("content://")) {
-                extractor.setDataSource(context, Uri.parse(pathOrUri), null)
-            } else {
-                extractor.setDataSource(pathOrUri)
+            if (!MediaProbeHelper.setExtractorDataSource(context, extractor, pathOrUri)) {
+                return null
             }
             var trackIndex = -1
             var trackFormat: MediaFormat? = null
@@ -299,6 +334,10 @@ object AudioExportMixer {
             if (trackIndex < 0 || trackFormat == null) return null
 
             extractor.selectTrack(trackIndex)
+            val trimStartUs = trimStartMs.coerceAtLeast(0L) * 1000L
+            if (trimStartUs > 0L) {
+                extractor.seekTo(trimStartUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
+            }
             val mime = trackFormat.getString(MediaFormat.KEY_MIME) ?: return null
             val srcRate = if (trackFormat.containsKey(MediaFormat.KEY_SAMPLE_RATE)) trackFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE) else SAMPLE_RATE
             val srcChannels = if (trackFormat.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) trackFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT) else 1
@@ -347,21 +386,33 @@ object AudioExportMixer {
                         val ch = srcChannels.coerceAtLeast(1)
                         val totalShorts = info.size / 2
                         val framesInChunk = totalShorts / ch
-                        if (framesInChunk > 0) {
-                            val needed = decodedCount + framesInChunk
-                            if (needed > decodedBuf.size) {
-                                var nextCap = decodedBuf.size * 2
-                                while (nextCap < needed) nextCap *= 2
-                                decodedBuf = decodedBuf.copyOf(min(nextCap, srcMaxSamples + 4096))
-                            }
-                            var s = 0
-                            while (s + ch - 1 < totalShorts && decodedCount < decodedBuf.size) {
-                                var sum = 0
-                                for (c in 0 until ch) {
-                                    sum += outBuf.short.toInt()
+                        val beforeTrimEnd = info.presentationTimeUs + ((framesInChunk * 1_000_000L) / srcRate.coerceAtLeast(8000))
+                        if (framesInChunk > 0 && (trimStartUs <= 0L || beforeTrimEnd >= trimStartUs)) {
+                            val skipFrames = if (trimStartUs > info.presentationTimeUs) {
+                                (((trimStartUs - info.presentationTimeUs) * srcRate) / 1_000_000L)
+                                    .toInt()
+                                    .coerceIn(0, framesInChunk)
+                            } else 0
+                            val keepFrames = framesInChunk - skipFrames
+                            if (keepFrames > 0) {
+                                val needed = decodedCount + keepFrames
+                                if (needed > decodedBuf.size) {
+                                    var nextCap = decodedBuf.size * 2
+                                    while (nextCap < needed) nextCap *= 2
+                                    decodedBuf = decodedBuf.copyOf(min(nextCap, srcMaxSamples + 4096))
                                 }
-                                decodedBuf[decodedCount++] = (sum / ch).toShort()
-                                s += ch
+                                var s = 0
+                                while (s + ch - 1 < totalShorts) {
+                                    var sum = 0
+                                    for (c in 0 until ch) {
+                                        sum += outBuf.short.toInt()
+                                    }
+                                    val frameIdx = s / ch
+                                    if (frameIdx >= skipFrames && decodedCount < decodedBuf.size) {
+                                        decodedBuf[decodedCount++] = (sum / ch).toShort()
+                                    }
+                                    s += ch
+                                }
                             }
                         }
                     }

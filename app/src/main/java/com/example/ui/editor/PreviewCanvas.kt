@@ -8,6 +8,7 @@ import android.media.MediaPlayer
 import android.media.PlaybackParams
 import android.net.Uri
 import android.os.Build
+import android.os.SystemClock
 import android.view.Surface as AndroidSurface
 import android.view.TextureView
 import androidx.compose.foundation.Canvas
@@ -49,6 +50,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -99,6 +101,7 @@ import com.example.domain.engine.ColorGradingEngine
 import com.example.domain.engine.CustomFontManager
 import com.example.domain.engine.EvaluatedTransform
 import com.example.domain.engine.KeyframeInterpolator
+import com.example.domain.engine.MediaProbeHelper
 import com.example.domain.engine.SpeedRampEngine
 import com.example.domain.engine.TransitionAndChromaEngine
 import com.example.domain.engine.VideoExportEngine
@@ -202,7 +205,7 @@ fun PreviewCanvas(
     val activeVideo = visualClips.firstOrNull { it.trackType == TrackType.VIDEO }
     val liveSpeed = activeVideo?.let {
         val norm = if (it.durationMs > 0) (playheadMs - it.startMs).toFloat() / it.durationMs else 0f
-        SpeedRampEngine.evaluateSpeedAt(it.speedRamp, norm)
+        SpeedRampEngine.evaluateEffectiveSpeedAt(it.speedRamp, norm, it.playbackSpeed)
     } ?: 1f
 
     Box(
@@ -285,8 +288,8 @@ fun PreviewCanvas(
                 val applyShake = clip.trackType == TrackType.VIDEO || clip.trackType == TrackType.GRAPHICS
                 val clipSpeedAtPlayhead = if (clip.durationMs > 0L) {
                     val norm = (playheadMs - clip.startMs).toFloat() / clip.durationMs.toFloat()
-                    SpeedRampEngine.evaluateSpeedAt(clip.speedRamp, norm)
-                } else 1f
+                    SpeedRampEngine.evaluateEffectiveSpeedAt(clip.speedRamp, norm, clip.playbackSpeed)
+                } else clip.playbackSpeed.coerceIn(0.25f, 4.0f)
 
                 Box(
                     modifier = Modifier
@@ -359,11 +362,7 @@ fun PreviewCanvas(
                         clip.mediaSource?.let { src ->
                             RenderMediaSource(
                                 src = src,
-                                playheadLocalMs = SpeedRampEngine.computeRemappedVideoTimeMs(
-                                    clip.speedRamp,
-                                    (playheadMs - clip.startMs).coerceAtLeast(0L),
-                                    clip.durationMs
-                                ),
+                                playheadLocalMs = clip.computeSourcePositionMs(playheadMs),
                                 isPlaying = isPlaying,
                                 playbackSpeed = clipSpeedAtPlayhead,
                                 colorFilter = ColorFilter.colorMatrix(ColorGradingEngine.buildComposeColorMatrix(effectiveGrade)),
@@ -414,6 +413,30 @@ fun PreviewCanvas(
                                 progress = progress,
                                 modifier = Modifier.fillMaxSize(0.86f)
                             )
+                        }
+
+                        // 4b. Universal Map Animation Studio Layer (2D World, 3D Globe, War, History, Travel, Weather)
+                        clip.mapConfig?.let { mapCfg ->
+                            val clipLocalMs = (playheadMs - clip.startMs).coerceAtLeast(0L)
+                            val scaledMs = if (clip.durationMs > 0L) {
+                                ((clipLocalMs.toFloat() / clip.durationMs.toFloat()) * mapCfg.durationMs.coerceAtLeast(1000L)).toLong()
+                            } else clipLocalMs
+                            Canvas(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .clip(RoundedCornerShape(6.dp))
+                            ) {
+                                drawIntoCanvas { c ->
+                                    com.example.domain.map.UniversalMapRenderer.renderFrame(
+                                        canvas = c.nativeCanvas,
+                                        width = size.width,
+                                        height = size.height,
+                                        config = mapCfg,
+                                        playheadMs = scaledMs,
+                                        isClipFrame = false
+                                    )
+                                }
+                            }
                         }
 
                         // 5. Hollywood VFX Overlay
@@ -1768,6 +1791,12 @@ private fun VideoSurfacePreview(
     var videoH by remember(uriString) { mutableStateOf(9) }
     var lastAppliedSpeed by remember(uriString) { mutableStateOf(1f) }
     var lastSeekTargetMs by remember(uriString) { mutableStateOf(-1L) }
+    var lastPlayingSeekWallMs by remember(uriString) { mutableStateOf(0L) }
+
+    // Keep latest state accessible inside TextureView/MediaPlayer async callbacks
+    val latestPlayheadLocalMs by rememberUpdatedState(playheadLocalMs)
+    val latestIsPlaying by rememberUpdatedState(isPlaying)
+    val latestPlaybackSpeed by rememberUpdatedState(playbackSpeed)
 
     DisposableEffect(uriString) {
         onDispose {
@@ -1784,17 +1813,26 @@ private fun VideoSurfacePreview(
         val mp = mediaPlayer ?: return@LaunchedEffect
         if (!isPrepared) return@LaunchedEffect
         runCatching {
-            val quantizedSpeed = ((playbackSpeed.coerceIn(0.25f, 3.0f) * 10f).toInt() / 10f)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && isPlaying && abs(quantizedSpeed - lastAppliedSpeed) > 0.05f) {
+            val dur = mp.duration.toLong().coerceAtLeast(1L)
+            val targetMs = latestPlayheadLocalMs.coerceIn(0L, (dur - 1L).coerceAtLeast(0L))
+            val quantizedSpeed = ((playbackSpeed.coerceIn(0.25f, 3.0f) * 20f).toInt() / 20f)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && isPlaying && abs(quantizedSpeed - lastAppliedSpeed) > 0.04f) {
                 mp.playbackParams = PlaybackParams().apply { speed = quantizedSpeed }
                 lastAppliedSpeed = quantizedSpeed
             }
-            if (isPlaying && !mp.isPlaying) {
-                val dur = mp.duration.coerceAtLeast(1)
-                mp.seekTo((playheadLocalMs % dur).toInt().coerceAtLeast(0))
-                mp.start()
-            } else if (!isPlaying && mp.isPlaying) {
-                mp.pause()
+            if (isPlaying) {
+                if (targetMs >= dur - 25L) {
+                    if (mp.isPlaying) mp.pause()
+                    seekSurfaceMp(mp, dur - 1L, exact = true)
+                } else if (!mp.isPlaying) {
+                    seekSurfaceMp(mp, targetMs, exact = true)
+                    lastPlayingSeekWallMs = SystemClock.elapsedRealtime()
+                    mp.start()
+                }
+            } else {
+                if (mp.isPlaying) mp.pause()
+                seekSurfaceMp(mp, targetMs, exact = true)
+                lastSeekTargetMs = targetMs
             }
         }
     }
@@ -1802,25 +1840,25 @@ private fun VideoSurfacePreview(
     LaunchedEffect(playheadLocalMs, isPrepared, isPlaying) {
         val mp = mediaPlayer ?: return@LaunchedEffect
         if (!isPrepared) return@LaunchedEffect
-        runCatching {
-            val dur = mp.duration.coerceAtLeast(1)
-            val targetMs = (playheadLocalMs % dur).toInt().coerceIn(0, dur - 1)
-            val diff = abs(mp.currentPosition - targetMs)
-            if (!isPlaying) {
-                if (abs(targetMs.toLong() - lastSeekTargetMs) >= 60L) {
-                    lastSeekTargetMs = targetMs.toLong()
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        mp.seekTo(targetMs.toLong(), MediaPlayer.SEEK_PREVIOUS_SYNC)
-                    } else {
-                        mp.seekTo(targetMs)
-                    }
-                }
-            } else if (diff > 550) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    mp.seekTo(targetMs.toLong(), MediaPlayer.SEEK_PREVIOUS_SYNC)
-                } else {
-                    mp.seekTo(targetMs)
-                }
+        val dur = runCatching { mp.duration.toLong() }.getOrDefault(1L).coerceAtLeast(1L)
+        val targetMs = playheadLocalMs.coerceIn(0L, (dur - 1L).coerceAtLeast(0L))
+        if (!isPlaying) {
+            if (abs(targetMs - lastSeekTargetMs) >= 45L) {
+                lastSeekTargetMs = targetMs
+                runCatching { seekSurfaceMp(mp, targetMs, exact = false) }
+            }
+            kotlinx.coroutines.delay(110L)
+            runCatching { seekSurfaceMp(mp, targetMs, exact = true) }
+        } else {
+            if (targetMs >= dur - 25L) {
+                runCatching { if (mp.isPlaying) mp.pause() }
+                return@LaunchedEffect
+            }
+            val nowWall = SystemClock.elapsedRealtime()
+            val diff = abs(runCatching { mp.currentPosition.toLong() }.getOrDefault(targetMs) - targetMs)
+            if (diff > 420L && (nowWall - lastPlayingSeekWallMs) > 480L) {
+                lastPlayingSeekWallMs = nowWall
+                runCatching { seekSurfaceMp(mp, targetMs, exact = true) }
             }
         }
     }
@@ -1835,9 +1873,13 @@ private fun VideoSurfacePreview(
                     override fun onSurfaceTextureAvailable(surfaceTexture: SurfaceTexture, width: Int, height: Int) {
                         runCatching {
                             val mp = MediaPlayer().apply {
-                                setDataSource(context, Uri.parse(uriString))
+                                val srcOk = MediaProbeHelper.setMediaPlayerDataSource(context, this, uriString)
+                                if (!srcOk) {
+                                    release()
+                                    return
+                                }
                                 setSurface(AndroidSurface(surfaceTexture))
-                                isLooping = true
+                                isLooping = false
                                 setVolume(0f, 0f)
                                 setOnErrorListener { _, _, _ -> true }
                                 setOnVideoSizeChangedListener { _, w, h ->
@@ -1853,9 +1895,20 @@ private fun VideoSurfacePreview(
                                     videoW = readyMp.videoWidth.coerceAtLeast(16)
                                     videoH = readyMp.videoHeight.coerceAtLeast(9)
                                     applyCenterCropTransform(textureView, textureView.width.coerceAtLeast(width), textureView.height.coerceAtLeast(height), videoW, videoH)
-                                    val dur = readyMp.duration.coerceAtLeast(1)
-                                    readyMp.seekTo((playheadLocalMs % dur).toInt().coerceAtLeast(0))
-                                    if (isPlaying) readyMp.start()
+                                    val dur = readyMp.duration.toLong().coerceAtLeast(1L)
+                                    val targetMs = latestPlayheadLocalMs.coerceIn(0L, (dur - 1L).coerceAtLeast(0L))
+                                    seekSurfaceMp(readyMp, targetMs, exact = true)
+                                    lastSeekTargetMs = targetMs
+                                    if (latestIsPlaying && targetMs < dur - 25L) {
+                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                                            val spd = latestPlaybackSpeed.coerceIn(0.25f, 3.0f)
+                                            runCatching {
+                                                readyMp.playbackParams = PlaybackParams().apply { speed = spd }
+                                                lastAppliedSpeed = spd
+                                            }
+                                        }
+                                        readyMp.start()
+                                    }
                                 }
                                 prepareAsync()
                             }
@@ -1889,6 +1942,16 @@ private fun VideoSurfacePreview(
     )
 }
 
+private fun seekSurfaceMp(mp: MediaPlayer, targetMs: Long, exact: Boolean) {
+    val safeMs = targetMs.coerceAtLeast(0L)
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        val mode = if (exact) MediaPlayer.SEEK_CLOSEST else MediaPlayer.SEEK_CLOSEST_SYNC
+        mp.seekTo(safeMs, mode)
+    } else {
+        mp.seekTo(safeMs.toInt())
+    }
+}
+
 private fun applyCenterCropTransform(view: TextureView, viewW: Int, viewH: Int, videoW: Int, videoH: Int) {
     if (viewW <= 0 || viewH <= 0 || videoW <= 0 || videoH <= 0) return
     val scaleX = videoW.toFloat() / viewW.toFloat()
@@ -1913,7 +1976,12 @@ private fun VideoFramePreview(
     val context = LocalContext.current
     val retriever = remember(uriString) {
         runCatching {
-            MediaMetadataRetriever().apply { setDataSource(context, Uri.parse(uriString)) }
+            MediaMetadataRetriever().also { mmr ->
+                if (!MediaProbeHelper.setRetrieverDataSource(context, mmr, uriString)) {
+                    mmr.release()
+                    throw IllegalStateException("Unable to open retriever")
+                }
+            }
         }.getOrNull()
     }
     DisposableEffect(uriString) {

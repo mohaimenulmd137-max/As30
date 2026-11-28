@@ -76,6 +76,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.domain.engine.MediaProbeHelper
 import com.example.domain.model.StudioProject
 import com.example.domain.model.TimelineClip
 import com.example.domain.model.TrackLayerState
@@ -165,8 +166,16 @@ fun MultiTrackTimeline(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                val durLabel = MediaProbeHelper.formatDurationReadable(selectedClip.durationMs)
+                val infoText = if (selectedClip.sourceDurationMs > 0L) {
+                    val tIn = MediaProbeHelper.formatDurationReadable(selectedClip.trimStartMs)
+                    val tOut = MediaProbeHelper.formatDurationReadable(selectedClip.trimEndMs)
+                    "${selectedClip.title} ($durLabel · $tIn–$tOut · L${selectedClip.laneIndex + 1})"
+                } else {
+                    "${selectedClip.title} ($durLabel · L${selectedClip.laneIndex + 1})"
+                }
                 Text(
-                    text = "${selectedClip.title} (L${selectedClip.laneIndex + 1})",
+                    text = infoText,
                     fontSize = 10.sp,
                     color = AmberDocumentary,
                     fontWeight = FontWeight.Bold,
@@ -237,7 +246,7 @@ fun MultiTrackTimeline(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Surface(
-                                onClick = { pxPerSecDp = (pxPerSecDp * 0.78f).coerceIn(14f, 160f) },
+                                onClick = { pxPerSecDp = (pxPerSecDp * 0.72f).coerceIn(0.25f, 160f) },
                                 color = StudioSurfaceElevated,
                                 shape = CircleShape,
                                 border = BorderStroke(1.dp, StudioBorder),
@@ -249,14 +258,14 @@ fun MultiTrackTimeline(
                             }
                             Surface(
                                 onClick = {
-                                    val totalSec = (project.totalDurationMs / 1000f).coerceAtLeast(4f)
-                                    val fitDp = (timelineViewportWidthDp.value * 0.86f / totalSec).coerceIn(14f, 140f)
+                                    val totalSec = (project.totalDurationMs / 1000f).coerceAtLeast(2f)
+                                    val fitDp = (timelineViewportWidthDp.value * 0.86f / totalSec).coerceIn(0.25f, 140f)
                                     pxPerSecDp = fitDp
                                 },
                                 color = Color(0xFF282213),
                                 shape = RoundedCornerShape(6.dp),
                                 border = BorderStroke(1.dp, AmberDocumentary.copy(alpha = 0.45f)),
-                                modifier = Modifier.height(22.dp)
+                                modifier = Modifier.height(22.dp).testTag("timeline_fit_button")
                             ) {
                                 Box(
                                     contentAlignment = Alignment.Center,
@@ -271,7 +280,7 @@ fun MultiTrackTimeline(
                                 }
                             }
                             Surface(
-                                onClick = { pxPerSecDp = (pxPerSecDp * 1.28f).coerceIn(14f, 160f) },
+                                onClick = { pxPerSecDp = (pxPerSecDp * 1.35f).coerceIn(0.25f, 160f) },
                                 color = StudioSurfaceElevated,
                                 shape = CircleShape,
                                 border = BorderStroke(1.dp, StudioBorder),
@@ -342,12 +351,30 @@ fun MultiTrackTimeline(
                         }
                 ) {
                     Column(modifier = Modifier.fillMaxSize()) {
-                        // Top Timecode Ruler (adapts tick density for up to 10-minute timelines)
+                        // Top Timecode Ruler (adaptive multi-minute scale & viewport-culled for 60fps on 60m+ timelines)
                         val tickStepSec = when {
-                            pxPerSecDp < 18f -> 10
-                            pxPerSecDp < 30f -> 5
+                            pxPerSecDp < 0.7f -> 300
+                            pxPerSecDp < 1.6f -> 120
+                            pxPerSecDp < 3.5f -> 60
+                            pxPerSecDp < 7.5f -> 30
+                            pxPerSecDp < 14f -> 15
+                            pxPerSecDp < 24f -> 10
+                            pxPerSecDp < 42f -> 5
                             else -> 2
                         }
+                        val minorStep = when {
+                            tickStepSec >= 300 -> 60
+                            tickStepSec >= 120 -> 30
+                            tickStepSec >= 60 -> 15
+                            tickStepSec >= 30 -> 5
+                            tickStepSec >= 10 -> 2
+                            else -> 1
+                        }
+                        val totalTimelineSec = (project.totalDurationMs / 1000L).toInt() + 2
+                        val visMinSecRaw = if (pxPerMs > 0f) (((-scrollOffsetPx - 40f) / (1000f * pxPerMs)).toInt() - tickStepSec) else 0
+                        val visMaxSecRaw = if (pxPerMs > 0f) (((timelineViewportPx - scrollOffsetPx + 60f) / (1000f * pxPerMs)).toInt() + tickStepSec) else totalTimelineSec
+                        val visStartSec = visMinSecRaw.coerceIn(0, totalTimelineSec)
+                        val visEndSec = visMaxSecRaw.coerceIn(visStartSec, totalTimelineSec)
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -355,19 +382,19 @@ fun MultiTrackTimeline(
                                 .background(Color(0xFF0E131F))
                         ) {
                             Canvas(modifier = Modifier.fillMaxSize()) {
-                                val totalSec = (project.totalDurationMs / 1000L).toInt() + 2
-                                val minorStep = if (pxPerSecDp < 20f) 5 else 1
-                                for (sec in 0..totalSec step minorStep) {
+                                val alignedStart = (visStartSec / minorStep) * minorStep
+                                for (sec in alignedStart..visEndSec step minorStep) {
                                     val x = scrollOffsetPx + (sec * 1000f * pxPerMs)
                                     if (x in -20f..(size.width + 20f)) {
+                                        val isMajor = sec % tickStepSec == 0
                                         drawLine(
-                                            color = TextMuted.copy(alpha = 0.6f),
-                                            start = Offset(x, size.height * 0.56f),
+                                            color = TextMuted.copy(alpha = if (isMajor) 0.78f else 0.45f),
+                                            start = Offset(x, size.height * if (isMajor) 0.42f else 0.62f),
                                             end = Offset(x, size.height),
-                                            strokeWidth = 2f
+                                            strokeWidth = if (isMajor) 2.2f else 1.5f
                                         )
                                     }
-                                    if (minorStep == 1) {
+                                    if (minorStep == 1 && pxPerSecDp >= 24f) {
                                         val halfX = x + 500f * pxPerMs
                                         if (halfX in -20f..(size.width + 20f)) {
                                             drawLine(
@@ -381,11 +408,17 @@ fun MultiTrackTimeline(
                                 }
                             }
 
-                            val totalSec = (project.totalDurationMs / 1000L).toInt() + 1
-                            for (sec in 0..totalSec step tickStepSec) {
+                            val alignedMajorStart = (visStartSec / tickStepSec) * tickStepSec
+                            for (sec in alignedMajorStart..visEndSec step tickStepSec) {
                                 val xPx = scrollOffsetPx + (sec * 1000f * pxPerMs)
                                 if (xPx in -40f..(timelineViewportPx + 40f)) {
-                                    val label = if (sec >= 60) "%d:%02d".format(sec / 60, sec % 60) else ":%02d".format(sec)
+                                    val label = if (sec >= 3600) {
+                                        "%d:%02d:%02d".format(sec / 3600, (sec % 3600) / 60, sec % 60)
+                                    } else if (sec >= 60) {
+                                        "%d:%02d".format(sec / 60, sec % 60)
+                                    } else {
+                                        ":%02d".format(sec)
+                                    }
                                     Text(
                                         text = label,
                                         fontSize = 10.sp,
@@ -724,11 +757,15 @@ private fun TimelineTrackClipsRow(
                     }
                 }
 
-                // Clip title + badges (including Mute & Solo)
+                // Sticky clip title + duration + speed + audio badges (readable even when a 5-10m clip extends offscreen)
+                val clipWidthPx = (clip.durationMs * pxPerMs).coerceAtLeast(42f)
+                val stickyPadDp = with(density) {
+                    (-leftPx).coerceIn(0f, (clipWidthPx - 110f).coerceAtLeast(0f)).toDp()
+                }
                 Row(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(horizontal = if (isSelected) 18.dp else 6.dp),
+                        .padding(start = stickyPadDp + if (isSelected) 18.dp else 6.dp, end = if (isSelected) 18.dp else 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(3.dp)
                 ) {
@@ -741,6 +778,23 @@ private fun TimelineTrackClipsRow(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f, fill = false)
                     )
+                    if (clipWidthPx >= 86f) {
+                        Text(
+                            text = MediaProbeHelper.formatDurationReadable(clip.durationMs),
+                            fontSize = 9.sp,
+                            color = TextPrimary.copy(alpha = 0.8f),
+                            maxLines = 1
+                        )
+                    }
+                    if (abs(clip.playbackSpeed - 1.0f) > 0.05f && clipWidthPx >= 115f) {
+                        Text(
+                            text = "%.1fx".format(clip.playbackSpeed),
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = AmberDocumentary,
+                            maxLines = 1
+                        )
+                    }
                     if (clip.audioConfig.isMuted) {
                         Icon(Icons.AutoMirrored.Filled.VolumeOff, contentDescription = "Muted", tint = CoralAction, modifier = Modifier.size(10.dp))
                     } else if (clip.audioConfig.isSolo) {
@@ -760,9 +814,9 @@ private fun TimelineTrackClipsRow(
                     }
                 }
 
-                // Left & Right 16.dp Trim Handles (200ms..600_000ms) when selected & unlocked
+                // Left & Right 16.dp Trim Handles (honors full sourceDurationMs up to 2h) when selected & unlocked
                 if (isSelected && !locked) {
-                    // Left trim bar (adjusts startMs + durationMs)
+                    // Left trim bar (adjusts startMs + trimStartMs + durationMs)
                     Box(
                         modifier = Modifier
                             .align(Alignment.CenterStart)
@@ -784,7 +838,11 @@ private fun TimelineTrackClipsRow(
                                         accum += dragAmount
                                         val deltaMs = (accum / currentPxPerMs).toLong()
                                         val nextStart = (initStart + deltaMs).coerceIn(0L, (initEnd - 200L).coerceAtLeast(0L))
-                                        onTrimClip(latestClip.id, nextStart, (initEnd - nextStart).coerceIn(200L, 600_000L))
+                                        onTrimClip(
+                                            latestClip.id,
+                                            nextStart,
+                                            (initEnd - nextStart).coerceIn(200L, MediaProbeHelper.MAX_TIMELINE_DURATION_MS)
+                                        )
                                     }
                                 )
                             },
@@ -793,7 +851,7 @@ private fun TimelineTrackClipsRow(
                         Box(modifier = Modifier.width(2.5.dp).height(16.dp).background(StudioObsidian, RoundedCornerShape(1.dp)))
                     }
 
-                    // Right trim bar (adjusts durationMs)
+                    // Right trim bar (adjusts durationMs up to remaining source or MAX_TIMELINE_DURATION_MS)
                     Box(
                         modifier = Modifier
                             .align(Alignment.CenterEnd)
@@ -812,7 +870,11 @@ private fun TimelineTrackClipsRow(
                                         change.consume()
                                         accum += dragAmount
                                         val deltaMs = (accum / currentPxPerMs).toLong()
-                                        onTrimClip(latestClip.id, latestClip.startMs, (initDur + deltaMs).coerceIn(200L, 600_000L))
+                                        onTrimClip(
+                                            latestClip.id,
+                                            latestClip.startMs,
+                                            (initDur + deltaMs).coerceIn(200L, MediaProbeHelper.MAX_TIMELINE_DURATION_MS)
+                                        )
                                     }
                                 )
                             },

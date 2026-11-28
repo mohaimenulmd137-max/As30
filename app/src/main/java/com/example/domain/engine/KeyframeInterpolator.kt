@@ -553,20 +553,35 @@ object SpeedRampEngine {
         return a.speed + (b.speed - a.speed) * frac
     }
 
+    fun evaluateEffectiveSpeedAt(
+        profile: SpeedRampProfile,
+        normalizedTime: Float,
+        baseSpeed: Float = 1f
+    ): Float {
+        return (evaluateSpeedAt(profile, normalizedTime) * baseSpeed.coerceIn(0.25f, 4.0f))
+            .coerceIn(0.25f, 4.0f)
+    }
+
     fun computeRemappedVideoTimeMs(
         profile: SpeedRampProfile,
         localMs: Long,
-        clipDurationMs: Long
+        clipDurationMs: Long,
+        baseSpeed: Float = 1f
     ): Long {
-        if (clipDurationMs <= 0L) return 0L
+        if (clipDurationMs <= 0L || localMs <= 0L) return 0L
+        val safeBase = baseSpeed.coerceIn(0.25f, 4.0f).toDouble()
+        val clampedLocal = localMs.coerceIn(0L, clipDurationMs)
+        if (profile.points.isEmpty() || profile.points.all { kotlin.math.abs(it.speed - 1f) < 0.001f }) {
+            return kotlin.math.round(clampedLocal.toDouble() * safeBase).toLong().coerceAtLeast(0L)
+        }
         val steps = 20
-        val normTarget = (localMs.toFloat() / clipDurationMs.toFloat()).coerceIn(0f, 1f)
-        var integral = 0f
+        val normTarget = (clampedLocal.toDouble() / clipDurationMs.toDouble()).coerceIn(0.0, 1.0)
+        var integral = 0.0
         val dt = normTarget / steps
         for (i in 0 until steps) {
-            val mid = (i + 0.5f) * dt
-            integral += evaluateSpeedAt(profile, mid) * dt
+            val mid = ((i + 0.5) * dt).toFloat()
+            integral += evaluateSpeedAt(profile, mid).toDouble() * dt
         }
-        return (integral * clipDurationMs).toLong().coerceAtLeast(0L)
+        return kotlin.math.round(integral * clipDurationMs.toDouble() * safeBase).toLong().coerceAtLeast(0L)
     }
 }

@@ -267,6 +267,9 @@ object ProjectSerializer {
         put("title", c.title)
         put("startMs", c.startMs)
         put("durationMs", c.durationMs)
+        put("sourceDurationMs", c.sourceDurationMs)
+        put("trimStartMs", c.trimStartMs)
+        put("playbackSpeed", c.playbackSpeed.toDouble())
         put("isLocked", c.isLocked)
         put("isHidden", c.isHidden)
         put("posX", c.posX.toDouble())
@@ -446,6 +449,9 @@ object ProjectSerializer {
                 put("counterSuffix", ic.counterSuffix)
                 put("accentHex", ic.accentHex)
             })
+        }
+        c.mapConfig?.let { mc ->
+            put("mapConfig", universalMapToJson(mc))
         }
         put("audioConfig", JSONObject().apply {
             put("volume", c.audioConfig.volume.toDouble())
@@ -676,6 +682,9 @@ object ProjectSerializer {
             )
         } else null
 
+        val mcJson = o.optJSONObject("mapConfig")
+        val mapConfig = mcJson?.let { universalMapFromJson(it) }
+
         val ac = o.optJSONObject("audioConfig")
         val audioConfig = if (ac != null) {
             AudioConfig(
@@ -715,6 +724,9 @@ object ProjectSerializer {
             title = o.optString("title", "Clip"),
             startMs = o.optLong("startMs", 0L),
             durationMs = o.optLong("durationMs", 4000L),
+            sourceDurationMs = o.optLong("sourceDurationMs", 0L).coerceAtLeast(0L),
+            trimStartMs = o.optLong("trimStartMs", 0L).coerceAtLeast(0L),
+            playbackSpeed = o.optDouble("playbackSpeed", 1.0).toFloat().coerceIn(0.25f, 4.0f),
             isLocked = o.optBoolean("isLocked", false),
             isHidden = o.optBoolean("isHidden", false),
             posX = o.optDouble("posX", 0.0).toFloat(),
@@ -742,6 +754,7 @@ object ProjectSerializer {
             chartConfig = chartConfig,
             comparisonGrid = comparisonGrid,
             investigativeConfig = investigativeConfig,
+            mapConfig = mapConfig,
             audioConfig = audioConfig,
             mediaSource = mediaSource
         )
@@ -754,5 +767,250 @@ object ProjectSerializer {
         return buildList {
             for (i in 0 until arr.length()) add(arr.optDouble(i, fallback[i].toDouble()).toFloat())
         }
+    }
+
+    private fun universalMapToJson(mc: com.example.domain.map.UniversalMapConfig): JSONObject = JSONObject().apply {
+        put("title", mc.title)
+        put("subtitle", mc.subtitle)
+        put("projectionMode", mc.projectionMode.name)
+        put("themeStyle", mc.themeStyle.name)
+        put("durationMs", mc.durationMs)
+        put("speedMultiplier", mc.speedMultiplier.toDouble())
+        put("showGraticuleGrid", mc.showGraticuleGrid)
+        put("showCountryBorders", mc.showCountryBorders)
+        put("showCountryNames", mc.showCountryNames)
+        put("showCoordinatesHud", mc.showCoordinatesHud)
+        put("showCompassRose", mc.showCompassRose)
+        put("showScaleBar", mc.showScaleBar)
+        put("keyframes", JSONArray().apply {
+            mc.keyframes.forEach { kf ->
+                put(JSONObject().apply {
+                    put("id", kf.id)
+                    put("label", kf.label)
+                    put("timeFraction", kf.timeFraction.toDouble())
+                    put("centerLat", kf.centerLat.toDouble())
+                    put("centerLon", kf.centerLon.toDouble())
+                    put("zoom", kf.zoom.toDouble())
+                    put("rotationDeg", kf.rotationDeg.toDouble())
+                    put("tiltDeg", kf.tiltDeg.toDouble())
+                    put("easing", kf.easing.name)
+                })
+            }
+        })
+        put("regions", JSONArray().apply {
+            mc.regions.forEach { r ->
+                put(JSONObject().apply {
+                    put("id", r.id)
+                    put("regionId", r.regionId)
+                    put("customLabel", r.customLabel)
+                    put("fillColorHex", r.fillColorHex)
+                    put("borderColorHex", r.borderColorHex)
+                    put("fillOpacity", r.fillOpacity.toDouble())
+                    put("borderDrawAnimated", r.borderDrawAnimated)
+                    put("territoryExpansion", r.territoryExpansion)
+                    put("startFrac", r.startFrac.toDouble())
+                    put("endFrac", r.endFrac.toDouble())
+                    put("isVisible", r.isVisible)
+                })
+            }
+        })
+        put("routes", JSONArray().apply {
+            mc.routes.forEach { rt ->
+                put(JSONObject().apply {
+                    put("id", rt.id)
+                    put("name", rt.name)
+                    put("routeStyle", rt.routeStyle.name)
+                    put("tipIcon", rt.tipIcon.name)
+                    put("colorHex", rt.colorHex)
+                    put("strokeWidthDp", rt.strokeWidthDp.toDouble())
+                    put("startFrac", rt.startFrac.toDouble())
+                    put("endFrac", rt.endFrac.toDouble())
+                    put("isVisible", rt.isVisible)
+                    put("waypoints", JSONArray().apply {
+                        rt.waypoints.forEach { wp ->
+                            put(JSONObject().apply {
+                                put("lat", wp.lat.toDouble())
+                                put("lon", wp.lon.toDouble())
+                            })
+                        }
+                    })
+                })
+            }
+        })
+        put("markers", JSONArray().apply {
+            mc.markers.forEach { mk ->
+                put(JSONObject().apply {
+                    put("id", mk.id)
+                    put("label", mk.label)
+                    put("subtitle", mk.subtitle)
+                    put("lat", mk.lat.toDouble())
+                    put("lon", mk.lon.toDouble())
+                    put("markerType", mk.markerType.name)
+                    put("colorHex", mk.colorHex)
+                    put("sizeScale", mk.sizeScale.toDouble())
+                    put("pulseAnimated", mk.pulseAnimated)
+                    put("showCoordinates", mk.showCoordinates)
+                    put("startFrac", mk.startFrac.toDouble())
+                    put("endFrac", mk.endFrac.toDouble())
+                    put("isVisible", mk.isVisible)
+                })
+            }
+        })
+        put("textLabels", JSONArray().apply {
+            mc.textLabels.forEach { tx ->
+                put(JSONObject().apply {
+                    put("id", tx.id)
+                    put("text", tx.text)
+                    put("lat", tx.lat.toDouble())
+                    put("lon", tx.lon.toDouble())
+                    put("colorHex", tx.colorHex)
+                    put("bgColorHex", tx.bgColorHex)
+                    put("fontSizeScale", tx.fontSizeScale.toDouble())
+                    put("showArrowPointer", tx.showArrowPointer)
+                    put("startFrac", tx.startFrac.toDouble())
+                    put("endFrac", tx.endFrac.toDouble())
+                    put("isVisible", tx.isVisible)
+                })
+            }
+        })
+    }
+
+    private fun universalMapFromJson(o: JSONObject): com.example.domain.map.UniversalMapConfig {
+        val kfsArr = o.optJSONArray("keyframes") ?: JSONArray()
+        val kfs = buildList {
+            for (i in 0 until kfsArr.length()) {
+                val k = kfsArr.getJSONObject(i)
+                add(
+                    com.example.domain.map.MapCameraKeyframe(
+                        id = k.optString("id", "kf_$i"),
+                        label = k.optString("label", "Cam $i"),
+                        timeFraction = k.optDouble("timeFraction", 0.0).toFloat(),
+                        centerLat = k.optDouble("centerLat", 23.81).toFloat(),
+                        centerLon = k.optDouble("centerLon", 90.41).toFloat(),
+                        zoom = k.optDouble("zoom", 2.0).toFloat(),
+                        rotationDeg = k.optDouble("rotationDeg", 0.0).toFloat(),
+                        tiltDeg = k.optDouble("tiltDeg", 0.0).toFloat(),
+                        easing = com.example.domain.map.MapCameraEasing.entries.firstOrNull { it.name == k.optString("easing") }
+                            ?: com.example.domain.map.MapCameraEasing.EASE_IN_OUT
+                    )
+                )
+            }
+        }
+        val regArr = o.optJSONArray("regions") ?: JSONArray()
+        val regs = buildList {
+            for (i in 0 until regArr.length()) {
+                val r = regArr.getJSONObject(i)
+                add(
+                    com.example.domain.map.MapRegionLayer(
+                        id = r.optString("id", "reg_$i"),
+                        regionId = r.optString("regionId", "bgd"),
+                        customLabel = r.optString("customLabel", ""),
+                        fillColorHex = r.optLong("fillColorHex", 0xFFFFB300),
+                        borderColorHex = r.optLong("borderColorHex", 0xFFFFE082),
+                        fillOpacity = r.optDouble("fillOpacity", 0.42).toFloat(),
+                        borderDrawAnimated = r.optBoolean("borderDrawAnimated", true),
+                        territoryExpansion = r.optBoolean("territoryExpansion", false),
+                        startFrac = r.optDouble("startFrac", 0.0).toFloat(),
+                        endFrac = r.optDouble("endFrac", 1.0).toFloat(),
+                        isVisible = r.optBoolean("isVisible", true)
+                    )
+                )
+            }
+        }
+        val rtArr = o.optJSONArray("routes") ?: JSONArray()
+        val rts = buildList {
+            for (i in 0 until rtArr.length()) {
+                val rt = rtArr.getJSONObject(i)
+                val wpsArr = rt.optJSONArray("waypoints") ?: JSONArray()
+                val wps = buildList {
+                    for (j in 0 until wpsArr.length()) {
+                        val w = wpsArr.getJSONObject(j)
+                        add(com.example.domain.map.MapLatLon(w.optDouble("lat", 23.81).toFloat(), w.optDouble("lon", 90.41).toFloat()))
+                    }
+                }
+                add(
+                    com.example.domain.map.MapRouteLayer(
+                        id = rt.optString("id", "rt_$i"),
+                        name = rt.optString("name", "Route ${i + 1}"),
+                        waypoints = wps,
+                        routeStyle = com.example.domain.map.MapRouteStyle.entries.firstOrNull { it.name == rt.optString("routeStyle") }
+                            ?: com.example.domain.map.MapRouteStyle.AIR_GREAT_CIRCLE,
+                        tipIcon = com.example.domain.map.MapRouteTipIcon.entries.firstOrNull { it.name == rt.optString("tipIcon") }
+                            ?: com.example.domain.map.MapRouteTipIcon.ARROW,
+                        colorHex = rt.optLong("colorHex", 0xFF00E5FF),
+                        strokeWidthDp = rt.optDouble("strokeWidthDp", 4.0).toFloat(),
+                        startFrac = rt.optDouble("startFrac", 0.1).toFloat(),
+                        endFrac = rt.optDouble("endFrac", 0.9).toFloat(),
+                        isVisible = rt.optBoolean("isVisible", true)
+                    )
+                )
+            }
+        }
+        val mkArr = o.optJSONArray("markers") ?: JSONArray()
+        val mks = buildList {
+            for (i in 0 until mkArr.length()) {
+                val m = mkArr.getJSONObject(i)
+                add(
+                    com.example.domain.map.MapMarkerLayer(
+                        id = m.optString("id", "mk_$i"),
+                        label = m.optString("label", "City"),
+                        subtitle = m.optString("subtitle", ""),
+                        lat = m.optDouble("lat", 23.81).toFloat(),
+                        lon = m.optDouble("lon", 90.41).toFloat(),
+                        markerType = com.example.domain.map.MapMarkerType.entries.firstOrNull { it.name == m.optString("markerType") }
+                            ?: com.example.domain.map.MapMarkerType.PIN,
+                        colorHex = m.optLong("colorHex", 0xFFFFB300),
+                        sizeScale = m.optDouble("sizeScale", 1.0).toFloat(),
+                        pulseAnimated = m.optBoolean("pulseAnimated", true),
+                        showCoordinates = m.optBoolean("showCoordinates", false),
+                        startFrac = m.optDouble("startFrac", 0.0).toFloat(),
+                        endFrac = m.optDouble("endFrac", 1.0).toFloat(),
+                        isVisible = m.optBoolean("isVisible", true)
+                    )
+                )
+            }
+        }
+        val txArr = o.optJSONArray("textLabels") ?: JSONArray()
+        val txs = buildList {
+            for (i in 0 until txArr.length()) {
+                val t = txArr.getJSONObject(i)
+                add(
+                    com.example.domain.map.MapTextLayer(
+                        id = t.optString("id", "tx_$i"),
+                        text = t.optString("text", ""),
+                        lat = t.optDouble("lat", 24.5).toFloat(),
+                        lon = t.optDouble("lon", 90.0).toFloat(),
+                        colorHex = t.optLong("colorHex", 0xFFFFFFFF),
+                        bgColorHex = t.optLong("bgColorHex", 0xCC0A101C),
+                        fontSizeScale = t.optDouble("fontSizeScale", 1.0).toFloat(),
+                        showArrowPointer = t.optBoolean("showArrowPointer", true),
+                        startFrac = t.optDouble("startFrac", 0.0).toFloat(),
+                        endFrac = t.optDouble("endFrac", 1.0).toFloat(),
+                        isVisible = t.optBoolean("isVisible", true)
+                    )
+                )
+            }
+        }
+        return com.example.domain.map.UniversalMapConfig(
+            title = o.optString("title", "বিশ্ব মানচিত্র অ্যানিমেশন"),
+            subtitle = o.optString("subtitle", ""),
+            projectionMode = com.example.domain.map.MapProjectionMode.entries.firstOrNull { it.name == o.optString("projectionMode") }
+                ?: com.example.domain.map.MapProjectionMode.WORLD_2D,
+            themeStyle = com.example.domain.map.MapThemeStyle.entries.firstOrNull { it.name == o.optString("themeStyle") }
+                ?: com.example.domain.map.MapThemeStyle.TACTICAL_DARK,
+            durationMs = o.optLong("durationMs", 8_000L),
+            speedMultiplier = o.optDouble("speedMultiplier", 1.0).toFloat(),
+            showGraticuleGrid = o.optBoolean("showGraticuleGrid", true),
+            showCountryBorders = o.optBoolean("showCountryBorders", true),
+            showCountryNames = o.optBoolean("showCountryNames", true),
+            showCoordinatesHud = o.optBoolean("showCoordinatesHud", true),
+            showCompassRose = o.optBoolean("showCompassRose", true),
+            showScaleBar = o.optBoolean("showScaleBar", true),
+            keyframes = kfs,
+            regions = regs,
+            routes = rts,
+            markers = mks,
+            textLabels = txs
+        )
     }
 }

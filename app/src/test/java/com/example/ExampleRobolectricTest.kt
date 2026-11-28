@@ -343,4 +343,293 @@ class ExampleRobolectricTest {
         assertEquals(AudioExportMixer.SAMPLE_RATE * 10, pcm.size)
         assertTrue(pcm.any { it.toInt() != 0 })
     }
+
+    @Test
+    fun `project serializer roundtrips sourceDurationMs, trimStartMs, and playbackSpeed accurately`() {
+        val videoClip = TimelineClip(
+            trackType = TrackType.VIDEO,
+            title = "5m Source",
+            startMs = 1_500L,
+            durationMs = 120_000L,
+            sourceDurationMs = 300_000L,
+            trimStartMs = 45_000L,
+            playbackSpeed = 1.5f
+        )
+        val proj = StudioProject(name = "Long Media Sync", totalDurationMs = 121_500L, clips = listOf(videoClip))
+        val restored = ProjectSerializer.fromEntity(ProjectSerializer.toEntity(proj))
+        val restoredClip = restored.clips.first()
+
+        assertEquals(300_000L, restoredClip.sourceDurationMs)
+        assertEquals(45_000L, restoredClip.trimStartMs)
+        assertEquals(1.5f, restoredClip.playbackSpeed, 0.001f)
+        assertEquals(120_000L, restoredClip.durationMs)
+    }
+
+    @Test
+    fun `audio export fingerprint reflects trimStartMs and playbackSpeed changes`() {
+        val videoAudio = TimelineClip(
+            trackType = TrackType.VIDEO,
+            title = "Audio Video",
+            startMs = 0L,
+            durationMs = 30_000L,
+            sourceDurationMs = 60_000L,
+            trimStartMs = 0L,
+            playbackSpeed = 1.0f,
+            mediaSource = com.example.domain.model.MediaSource(uriString = "file:///tmp/demo.mp4", isVideo = true)
+        )
+        val projA = StudioProject(name = "A", totalDurationMs = 30_000L, clips = listOf(videoAudio))
+        val projTrimmed = StudioProject(name = "B", totalDurationMs = 30_000L, clips = listOf(videoAudio.copy(trimStartMs = 10_000L)))
+        val projSped = StudioProject(name = "C", totalDurationMs = 15_000L, clips = listOf(videoAudio.copy(durationMs = 15_000L, playbackSpeed = 2.0f)))
+
+        val fpA = AudioExportMixer.buildAudioFingerprint(projA)
+        val fpTrim = AudioExportMixer.buildAudioFingerprint(projTrimmed)
+        val fpSped = AudioExportMixer.buildAudioFingerprint(projSped)
+
+        assertTrue(fpA != fpTrim)
+        assertTrue(fpA != fpSped)
+    }
+
+    @Test
+    fun `media probe helper formats seconds, minutes, and hours cleanly`() {
+        assertEquals("00:30", com.example.domain.engine.MediaProbeHelper.formatDurationReadable(30_000L))
+        assertEquals("05:00", com.example.domain.engine.MediaProbeHelper.formatDurationReadable(300_000L))
+        assertEquals("1:05:00", com.example.domain.engine.MediaProbeHelper.formatDurationReadable(3_900_000L))
+    }
+
+    @Test
+    fun `live audio playback engine handles sync, pause, and clearCache safely`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val engine = com.example.domain.engine.LiveAudioPlaybackEngine()
+        val musicClip = TimelineClip(
+            trackType = TrackType.MUSIC,
+            title = "Ambient Track",
+            startMs = 0L,
+            durationMs = 60_000L,
+            audioConfig = AudioConfig(volume = 0.8f)
+        )
+        val proj = StudioProject(name = "Live Sync", totalDurationMs = 60_000L, clips = listOf(musicClip))
+
+        engine.syncToPlayhead(context, proj, playheadMs = 5_000L, isPlaying = false, forceSeek = true)
+        engine.pause()
+        engine.stop()
+        engine.clearCache()
+    }
+
+    @Test
+    fun `project serializer roundtrips full UniversalMapConfig across regions routes markers and text`() {
+        val preset = com.example.domain.map.MapPresetCatalog.presets.first {
+            it.category == com.example.domain.map.MapPresetCategory.WEATHER
+        }
+        val customConfig = preset.config.copy(
+            projectionMode = com.example.domain.map.MapProjectionMode.GLOBE_3D,
+            speedMultiplier = 1.4f,
+            textLabels = listOf(
+                com.example.domain.map.MapTextLayer(
+                    text = "গতিপথ সতর্কতা",
+                    lat = 18.5f,
+                    lon = 89.2f,
+                    showArrowPointer = true
+                )
+            )
+        )
+        val mapClip = TimelineClip(
+            trackType = TrackType.GRAPHICS,
+            laneIndex = 1,
+            title = "🗺️ ${preset.titleBn}",
+            startMs = 2_000L,
+            durationMs = customConfig.durationMs,
+            mapConfig = customConfig
+        )
+        val proj = StudioProject(name = "Universal Map Test", clips = listOf(mapClip))
+        val restored = ProjectSerializer.fromEntity(ProjectSerializer.toEntity(proj))
+        val restoredMap = restored.clips.first().mapConfig!!
+
+        assertEquals(com.example.domain.map.MapProjectionMode.GLOBE_3D, restoredMap.projectionMode)
+        assertEquals(customConfig.themeStyle, restoredMap.themeStyle)
+        assertEquals(1.4f, restoredMap.speedMultiplier, 0.001f)
+        assertEquals(customConfig.keyframes.size, restoredMap.keyframes.size)
+        assertEquals(customConfig.regions.size, restoredMap.regions.size)
+        assertEquals(customConfig.routes.size, restoredMap.routes.size)
+        assertEquals(customConfig.markers.size, restoredMap.markers.size)
+        assertEquals("গতিপথ সতর্কতা", restoredMap.textLabels.first().text)
+    }
+
+    @Test
+    fun `universal map renderer draws geography routes markers and HUD cleanly for 2D World Map and 3D Globe presets`() {
+        com.example.domain.map.MapPresetCatalog.presets.forEach { preset ->
+            val bmp = android.graphics.Bitmap.createBitmap(640, 360, android.graphics.Bitmap.Config.ARGB_8888)
+            val canvas = android.graphics.Canvas(bmp)
+            com.example.domain.map.UniversalMapRenderer.renderFrame(
+                canvas = canvas,
+                width = 640f,
+                height = 360f,
+                config = preset.config,
+                playheadMs = preset.config.durationMs / 2L,
+                isClipFrame = false
+            )
+            val shadow = org.robolectric.Shadows.shadowOf(canvas)
+            assertTrue("Expected non-empty draw history for ${preset.id}", shadow.description.isNotBlank())
+            bmp.recycle()
+        }
+
+        // Also verify centered Timeline clip frame rendering (isClipFrame = true)
+        val clipBmp = android.graphics.Bitmap.createBitmap(640, 360, android.graphics.Bitmap.Config.ARGB_8888)
+        val clipCanvas = android.graphics.Canvas(clipBmp)
+        clipCanvas.translate(320f, 180f)
+        val globePreset = com.example.domain.map.MapPresetCatalog.presets.first {
+            it.config.projectionMode == com.example.domain.map.MapProjectionMode.GLOBE_3D
+        }
+        com.example.domain.map.UniversalMapRenderer.renderFrame(
+            canvas = clipCanvas,
+            width = 640f,
+            height = 360f,
+            config = globePreset.config,
+            playheadMs = globePreset.config.durationMs / 2L,
+            isClipFrame = true
+        )
+        assertTrue(org.robolectric.Shadows.shadowOf(clipCanvas).description.isNotBlank())
+        clipBmp.recycle()
+    }
+
+    @Test
+    fun `adaptive memory manager drops to CRITICAL cache and thermal yield on memory pressure`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val mgr = com.example.domain.engine.export.AdaptiveMemoryManager(
+            context = context,
+            targetWidth = 1920,
+            targetHeight = 1080,
+            resolution = com.example.domain.model.PreviewResolution.P1080
+        )
+        val normalProfile = mgr.evaluateProfile(com.example.domain.engine.export.ExportThermalLevel.NORMAL)
+        assertTrue(normalProfile.maxBitmapCacheBytes <= 56L * 1024L * 1024L)
+        assertTrue(normalProfile.maxOpenVideoRetrievers in 1..4)
+
+        mgr.onTrimMemory(android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL)
+        val criticalProfile = mgr.evaluateProfile(com.example.domain.engine.export.ExportThermalLevel.SEVERE)
+        assertEquals(com.example.domain.engine.export.MemoryTier.CRITICAL, criticalProfile.tier)
+        assertEquals(8L * 1024L * 1024L, criticalProfile.maxBitmapCacheBytes)
+        assertEquals(1, criticalProfile.maxOpenVideoRetrievers)
+        assertEquals(18L, criticalProfile.thermalYieldMs)
+    }
+
+    @Test
+    fun `export recovery store persists frame progress error category and cleans abandoned temp files`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val tempFile = java.io.File(context.cacheDir, "chitraflow_export_abandoned_test.mp4").apply {
+            writeText("partial")
+        }
+        assertTrue(tempFile.exists())
+
+        val rec = com.example.domain.engine.export.ExportRecoveryRecord(
+            exportId = "exp_123",
+            projectId = "proj_1",
+            projectName = "Recovery Doc",
+            resolutionName = "P1080",
+            fps = 30,
+            codecName = "H264",
+            qualityName = "HIGH",
+            modeName = "SMART_AUTO",
+            targetUriString = null,
+            tempFilePath = tempFile.absolutePath,
+            lastCompletedFrame = 0,
+            totalFrames = 900,
+            timestampMs = 1_000L,
+            errorCategoryName = null,
+            failureReason = null
+        )
+        com.example.domain.engine.export.ExportRecoveryStore.saveRecord(context, rec)
+        com.example.domain.engine.export.ExportRecoveryStore.updateProgressFrame(context, "exp_123", 450)
+        com.example.domain.engine.export.ExportRecoveryStore.markFailed(
+            context,
+            "exp_123",
+            com.example.domain.engine.export.ExportErrorCategory.THERMAL_RESTRICTED,
+            "Overheat"
+        )
+
+        val loaded = com.example.domain.engine.export.ExportRecoveryStore.loadRecord(context)!!
+        assertEquals(450, loaded.lastCompletedFrame)
+        assertEquals("THERMAL_RESTRICTED", loaded.errorCategoryName)
+        assertEquals("Overheat", loaded.failureReason)
+
+        com.example.domain.engine.export.ExportRecoveryStore.cleanupAbandonedArtifactsAndClear(context)
+        assertTrue(!tempFile.exists())
+        assertEquals(null, com.example.domain.engine.export.ExportRecoveryStore.loadRecord(context))
+    }
+
+    @Test
+    fun `video export engine pre-flight storage check and error categorization never crash or OOM`() = kotlinx.coroutines.runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val capability = com.example.domain.engine.export.DeviceCapabilityAnalyzer.inspectDevice(context)
+        assertTrue(capability.supportedResolutions.isNotEmpty())
+        assertTrue(com.example.domain.engine.export.DeviceCapabilityAnalyzer.resolveEncoderChain(capability, com.example.domain.engine.export.ExportCodec.H264).isNotEmpty())
+
+        // Verify checkStorageForExport returns hasEnoughSpace=false when estimated size exceeds available bytes
+        val avail = com.example.domain.engine.export.ExportStorageManager.getAvailableBytes(context)
+        val excessiveDurationMs = ((avail / (48_000_000L / 8L)) + 3600L) * 1000L
+        val overBudgetCheck = com.example.domain.engine.export.ExportStorageManager.checkStorageForExport(
+            context = context,
+            durationMs = excessiveDurationMs.coerceAtLeast(36_000_000L),
+            videoBitrateBps = 48_000_000
+        )
+        assertTrue(!overBudgetCheck.hasEnoughSpace)
+        assertTrue(overBudgetCheck.requiredWithMarginBytes > overBudgetCheck.availableBytes)
+
+        // Run VideoExportEngine on 2h 4K Ultra project: expects clean categorized rejection (STORAGE_FULL or ENCODER_INIT_FAILED in JVM) with zero crash
+        val twoHourProject = StudioProject(
+            name = "2h Ultra Stress",
+            totalDurationMs = 7_200_000L,
+            previewResolution = com.example.domain.model.PreviewResolution.UHD4K
+        )
+        val result = com.example.domain.engine.VideoExportEngine.exportProjectStreaming(
+            context = context,
+            project = twoHourProject,
+            requestedConfig = com.example.domain.engine.export.ExportConfiguration(
+                resolution = com.example.domain.model.PreviewResolution.UHD4K,
+                fps = com.example.domain.model.ExportFps.FPS60,
+                codec = com.example.domain.engine.export.ExportCodec.H264,
+                quality = com.example.domain.engine.export.ExportQuality.ULTRA,
+                mode = com.example.domain.engine.export.ExportMode.HIGH_QUALITY
+            ),
+            onSnapshot = {}
+        )
+        assertTrue(!result.success)
+        assertTrue(
+            result.errorCategory == com.example.domain.engine.export.ExportErrorCategory.STORAGE_FULL ||
+                result.errorCategory == com.example.domain.engine.export.ExportErrorCategory.ENCODER_INIT_FAILED
+        )
+    }
+
+    @Test
+    fun `streaming audio export session mixes music and sfx in fixed 4096-sample chunks cleanly`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val music = TimelineClip(
+            trackType = TrackType.MUSIC,
+            title = "Stream BGM",
+            startMs = 0L,
+            durationMs = 5_000L,
+            audioConfig = AudioConfig(volume = 0.85f)
+        )
+        val sfx = TimelineClip(
+            trackType = TrackType.VOICEOVER,
+            title = "SFX",
+            startMs = 0L,
+            durationMs = 2_000L,
+            lockedSfxId = "sfx_whoosh_0",
+            audioConfig = AudioConfig(volume = 1.0f)
+        )
+        val proj = StudioProject(name = "Streaming Chunk Test", totalDurationMs = 5_000L, clips = listOf(music, sfx))
+        val session = com.example.domain.engine.export.StreamingAudioExportSession(context, proj, chunkSamples = 4096)
+        try {
+            val chunk0 = session.mixChunkForTest(0L, 4096)
+            val chunk1 = session.mixChunkForTest(4096L, 4096)
+            assertEquals(4096, chunk0.size)
+            assertEquals(4096, chunk1.size)
+            assertTrue(chunk0.any { it.toInt() != 0 })
+            assertTrue(chunk1.any { it.toInt() != 0 })
+        } finally {
+            session.release()
+        }
+    }
 }
+
+

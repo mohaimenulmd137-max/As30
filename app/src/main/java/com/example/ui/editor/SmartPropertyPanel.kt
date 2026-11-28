@@ -84,6 +84,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import com.example.domain.engine.AudioSynthEngine
 import com.example.domain.engine.CustomFontManager
+import com.example.domain.engine.MediaProbeHelper
 import com.example.domain.engine.VoiceoverRecorder
 import com.example.domain.model.AnimationCategory
 import com.example.domain.model.BlendModeOption
@@ -323,6 +324,7 @@ fun ExpandableInspectorSheet(
     isBangla: Boolean,
     voiceoverRecorder: VoiceoverRecorder,
     onUpdateClip: (String, (TimelineClip) -> TimelineClip) -> Unit,
+    onUpdateSpeed: (String, Float) -> Unit = { _, _ -> },
     onSelectAudioTarget: (String) -> Unit = {},
     onOpenFloatingAnimEditor: () -> Unit = {},
     onAddKeyframe: (String) -> Unit,
@@ -402,6 +404,11 @@ fun ExpandableInspectorSheet(
             when (section) {
                 ProToolSection.SPEED -> {
                     if (selectedClip != null) {
+                        ClipSpeedAndSourceInspector(
+                            clip = selectedClip,
+                            isBangla = isBangla,
+                            onSpeedChange = { spd -> onUpdateSpeed(selectedClip.id, spd) }
+                        )
                         SpeedRampGraphEditor(
                             profile = selectedClip.speedRamp,
                             onProfileChange = { next -> onUpdateClip(selectedClip.id) { it.copy(speedRamp = next) } }
@@ -545,6 +552,65 @@ fun ExpandableInspectorSheet(
                         onOpenChartStudio = onOpenChartStudio,
                         onOpenMapStudio = onOpenMapStudio,
                         onUpdateClip = onUpdateClip
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ClipSpeedAndSourceInspector(
+    clip: TimelineClip,
+    isBangla: Boolean,
+    onSpeedChange: (Float) -> Unit
+) {
+    val durText = MediaProbeHelper.formatDurationReadable(clip.durationMs)
+    val srcText = if (clip.sourceDurationMs > 0L) MediaProbeHelper.formatDurationReadable(clip.sourceDurationMs) else durText
+    val trimInText = MediaProbeHelper.formatDurationReadable(clip.trimStartMs)
+    val trimOutText = MediaProbeHelper.formatDurationReadable(clip.trimEndMs)
+
+    Surface(
+        color = StudioSurfaceElevated,
+        shape = RoundedCornerShape(10.dp),
+        border = BorderStroke(1.dp, StudioBorder),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(
+                    text = if (isBangla) "সোর্স: $srcText · টাইমলাইন: $durText" else "Source: $srcText · Timeline: $durText",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = CyanPlayhead,
+                    fontWeight = FontWeight.Bold
+                )
+                if (clip.sourceDurationMs > 0L) {
+                    Text(
+                        text = "$trimInText–$trimOutText",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AmberDocumentary
+                    )
+                }
+            }
+            InspectorSlider(
+                label = if (isBangla) "বেস স্পিড (Playback Speed)" else "Base Speed",
+                value = clip.playbackSpeed,
+                range = 0.25f..3.0f,
+                valueText = "%.2fx".format(clip.playbackSpeed),
+                onValueChange = onSpeedChange
+            )
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                items(listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f), key = { it }) { preset ->
+                    val active = kotlin.math.abs(clip.playbackSpeed - preset) < 0.04f
+                    FilterChip(
+                        selected = active,
+                        onClick = { onSpeedChange(preset) },
+                        label = { Text("${preset}x", style = MaterialTheme.typography.labelSmall) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = AmberDocumentary,
+                            selectedLabelColor = StudioObsidian,
+                            labelColor = TextPrimary
+                        )
                     )
                 }
             }

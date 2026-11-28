@@ -1,10 +1,8 @@
 package com.example.ui.editor
 
 import android.app.Application
-import android.media.MediaExtractor
-import android.media.MediaFormat
-import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.local.ProjectRepository
@@ -14,6 +12,7 @@ import com.example.domain.engine.AudioSynthEngine
 import com.example.domain.engine.CustomFontManager
 import com.example.domain.engine.ExportResult
 import com.example.domain.engine.LiveAudioPlaybackEngine
+import com.example.domain.engine.MediaProbeHelper
 import com.example.domain.engine.SpeedRampEngine
 import com.example.domain.engine.VideoExportEngine
 import com.example.domain.engine.VoiceoverRecorder
@@ -40,6 +39,16 @@ import com.example.domain.model.TransitionType
 import com.example.domain.model.UserAnimationPreset
 import com.example.domain.model.VfxConfig
 import com.example.domain.model.VfxEffectType
+import com.example.domain.engine.export.DeviceCapabilityAnalyzer
+import com.example.domain.engine.export.EncoderCapabilityReport
+import com.example.domain.engine.export.ExportCodec
+import com.example.domain.engine.export.ExportConfiguration
+import com.example.domain.engine.export.ExportCoordinator
+import com.example.domain.engine.export.ExportCoordinatorState
+import com.example.domain.engine.export.ExportMode
+import com.example.domain.engine.export.ExportProgressSnapshot
+import com.example.domain.engine.export.ExportQuality
+import com.example.domain.engine.export.ExportRecoveryRecord
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -48,6 +57,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -57,7 +67,11 @@ import kotlin.math.abs
 
 sealed interface ExportUiState {
     data object Idle : ExportUiState
-    data class Exporting(val progress: Float, val status: String) : ExportUiState
+    data class Exporting(
+        val progress: Float,
+        val status: String,
+        val snapshot: ExportProgressSnapshot? = null
+    ) : ExportUiState
     data class Completed(val result: ExportResult) : ExportUiState
 }
 
@@ -100,8 +114,24 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     private val _canRedo = MutableStateFlow(false)
     val canRedo: StateFlow<Boolean> = _canRedo.asStateFlow()
 
-    private val _exportState = MutableStateFlow<ExportUiState>(ExportUiState.Idle)
-    val exportState: StateFlow<ExportUiState> = _exportState.asStateFlow()
+    val exportState: StateFlow<ExportUiState> = ExportCoordinator.state
+        .map { coord ->
+            when (coord) {
+                is ExportCoordinatorState.Idle -> ExportUiState.Idle
+                is ExportCoordinatorState.Running -> ExportUiState.Exporting(
+                    progress = coord.snapshot.progress,
+                    status = coord.snapshot.statusText,
+                    snapshot = coord.snapshot
+                )
+                is ExportCoordinatorState.Finished -> ExportUiState.Completed(coord.result)
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, ExportUiState.Idle)
+
+    val exportRecoveryRecord: StateFlow<ExportRecoveryRecord?> = ExportCoordinator.recoveryRecord
+
+    private val _capabilityReport = MutableStateFlow<EncoderCapabilityReport?>(null)
+    val capabilityReport: StateFlow<EncoderCapabilityReport?> = _capabilityReport.asStateFlow()
 
     private val undoStack = ArrayDeque<StudioProject>()
     private val redoStack = ArrayDeque<StudioProject>()
@@ -109,15 +139,39 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     private var playbackJob: Job? = null
     private var replayStopJob: Job? = null
     private var saveJob: Job? = null
-    private var exportJob: Job? = null
     private var lastTriggeredSfxClipId: String? = null
+
+    init {
+        ExportCoordinator.refreshRecoveryState(application)
+        refreshDeviceCapabilities()
+    }
+
+    fun refreshDeviceCapabilities() {
+        val ratio = _project.value?.aspectRatio ?: AspectRatioPreset.LANDSCAPE_16_9
+        viewModelScope.launch(Dispatchers.Default) {
+            _capabilityReport.value = DeviceCapabilityAnalyzer.inspectDevice(getApplication(), ratio)
+        }
+    }
+
+    @Volatile
+    private var playbackAnchorWallMs: Long = 0L
+
+    @Volatile
+    private var playbackAnchorPlayheadMs: Long = 0L
 
     fun loadProject(projectId: String) {
         if (_project.value?.id == projectId) return
         viewModelScope.launch {
+            _isPlaying.value = false
+            playbackJob?.cancel()
+            liveAudioEngine.clearCache()
             val loaded = repository.getProject(projectId) ?: return@launch
             val normalizedLayers = ensureAllTrackLayers(loaded.trackLayers)
-            val ready = loaded.copy(trackLayers = normalizedLayers)
+            val repairedDuration = computeTotalDurationMs(loaded.clips)
+            val ready = loaded.copy(
+                trackLayers = normalizedLayers,
+                totalDurationMs = repairedDuration
+            )
             undoStack.clear()
             redoStack.clear()
             _canUndo.value = false
@@ -151,6 +205,10 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             trackLayers = ensureAllTrackLayers(updated.trackLayers)
         )
         _project.value = normalized
+        liveAudioEngine.updateProjectSnapshot(normalized)
+        if (_isPlaying.value) {
+            liveAudioEngine.syncToPlayhead(getApplication(), normalized, _playheadMs.value, isPlaying = true, forceSeek = false)
+        }
         scheduleAutoSave(normalized)
     }
 
@@ -189,11 +247,18 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     fun seekTo(ms: Long) {
         val dur = _project.value?.totalDurationMs ?: 15_000L
         val clamped = ms.coerceIn(0L, dur)
+        val nowWall = SystemClock.elapsedRealtime()
+        playbackAnchorWallMs = nowWall
+        playbackAnchorPlayheadMs = clamped
         _playheadMs.value = clamped
-        if (_isPlaying.value) {
-            _project.value?.let { proj ->
-                liveAudioEngine.startFrom(viewModelScope, getApplication(), proj, clamped, debounceMs = 55L)
-            }
+        _project.value?.let { proj ->
+            liveAudioEngine.syncToPlayhead(
+                context = getApplication(),
+                project = proj,
+                playheadMs = clamped,
+                isPlaying = _isPlaying.value,
+                forceSeek = true
+            )
         }
     }
 
@@ -201,7 +266,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         replayStopJob?.cancel()
         _isPlaying.value = false
         playbackJob?.cancel()
-        liveAudioEngine.stop()
+        liveAudioEngine.pause()
         seekTo(_playheadMs.value + deltaMs)
     }
 
@@ -210,37 +275,40 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         if (_isPlaying.value) {
             _isPlaying.value = false
             playbackJob?.cancel()
-            liveAudioEngine.stop()
+            liveAudioEngine.pause()
         } else {
             val proj = _project.value ?: return
-            if (_playheadMs.value >= proj.totalDurationMs) {
-                _playheadMs.value = 0L
+            val startFromMs = if (_playheadMs.value >= (proj.totalDurationMs - 40L).coerceAtLeast(0L)) {
+                0L.also { _playheadMs.value = 0L }
+            } else {
+                _playheadMs.value
             }
+            val nowWall = SystemClock.elapsedRealtime()
+            playbackAnchorWallMs = nowWall
+            playbackAnchorPlayheadMs = startFromMs
             _isPlaying.value = true
             lastTriggeredSfxClipId = null
-            liveAudioEngine.startFrom(viewModelScope, getApplication(), proj, _playheadMs.value)
+            liveAudioEngine.startFrom(
+                scope = viewModelScope,
+                context = getApplication(),
+                project = proj,
+                startPlayheadMs = startFromMs,
+                getLivePlayheadMs = { _playheadMs.value }
+            )
             playbackJob = viewModelScope.launch {
-                val frameStepMs = 33L
                 while (isActive && _isPlaying.value) {
+                    delay(16L)
                     val activeProj = _project.value ?: break
-                    val nowMs = _playheadMs.value
-
-                    val activeVideo = activeProj.clips.firstOrNull {
-                        it.trackType == TrackType.VIDEO && !it.isHidden && nowMs in it.startMs..it.endMs
-                    }
-                    val speedMult = if (activeVideo != null && activeVideo.durationMs > 0L) {
-                        val norm = (nowMs - activeVideo.startMs).toFloat() / activeVideo.durationMs.toFloat()
-                        SpeedRampEngine.evaluateSpeedAt(activeVideo.speedRamp, norm)
-                    } else 1f
-
-                    val nextMs = nowMs + (frameStepMs * speedMult).toLong().coerceAtLeast(8L)
-                    if (nextMs >= activeProj.totalDurationMs) {
-                        _playheadMs.value = 0L
-                        lastTriggeredSfxClipId = null
+                    val elapsed = (SystemClock.elapsedRealtime() - playbackAnchorWallMs).coerceAtLeast(0L)
+                    val targetPlayheadMs = playbackAnchorPlayheadMs + elapsed
+                    if (targetPlayheadMs >= activeProj.totalDurationMs) {
+                        _playheadMs.value = activeProj.totalDurationMs
+                        _isPlaying.value = false
+                        liveAudioEngine.pause()
+                        break
                     } else {
-                        _playheadMs.value = nextMs
+                        _playheadMs.value = targetPlayheadMs
                     }
-                    delay(frameStepMs)
                 }
             }
         }
@@ -364,12 +432,18 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         val proj = _project.value ?: return
         val clip = proj.clips.firstOrNull { it.id == clipId } ?: return
         if (isClipLocked(proj, clip)) return
-        val safeStart = newStartMs.coerceAtLeast(0L)
-        val safeDur = newDurationMs.coerceIn(200L, 600_000L)
-        val newClips = proj.clips.map {
-            if (it.id == clipId) it.copy(startMs = safeStart, durationMs = safeDur) else it
-        }
+        val updatedClip = applyTrimToClip(clip, newStartMs, newDurationMs)
+        val newClips = proj.clips.map { if (it.id == clipId) updatedClip else it }
         commitProject(proj.copy(clips = newClips), pushUndo = pushUndo)
+    }
+
+    fun updateClipPlaybackSpeed(clipId: String, newSpeed: Float) {
+        val proj = _project.value ?: return
+        val clip = proj.clips.firstOrNull { it.id == clipId } ?: return
+        if (isClipLocked(proj, clip)) return
+        val updatedClip = computeSpeedAdjustedClip(clip, newSpeed)
+        val newClips = proj.clips.map { if (it.id == clipId) updatedClip else it }
+        commitProject(proj.copy(clips = newClips), pushUndo = true)
     }
 
     private fun findFreeLaneIndex(
@@ -532,43 +606,15 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    private fun probeMediaDurationMs(uri: Uri, fallbackMs: Long): Long {
-        val mmrParsed = runCatching {
-            val mmr = MediaMetadataRetriever()
-            mmr.setDataSource(getApplication(), uri)
-            val durStr = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
-            mmr.release()
-            durStr?.toLongOrNull()
-        }.getOrNull()
-
-        if (mmrParsed != null && mmrParsed > 0L) {
-            return mmrParsed.coerceIn(1_000L, 600_000L)
-        }
-
-        val extractorParsed = runCatching {
-            val ex = MediaExtractor()
-            ex.setDataSource(getApplication(), uri, null)
-            var maxDurUs = 0L
-            for (i in 0 until ex.trackCount) {
-                val fmt = ex.getTrackFormat(i)
-                if (fmt.containsKey(MediaFormat.KEY_DURATION)) {
-                    maxDurUs = maxOf(maxDurUs, fmt.getLong(MediaFormat.KEY_DURATION))
-                }
-            }
-            ex.release()
-            if (maxDurUs > 0L) maxDurUs / 1000L else null
-        }.getOrNull()
-
-        return (extractorParsed ?: fallbackMs).coerceIn(1_000L, 600_000L)
-    }
-
-    fun addMediaClip(uri: Uri, isVideo: Boolean, label: String) {
+    fun addMediaClip(uri: Uri, isVideoHint: Boolean? = null, label: String? = null) {
         viewModelScope.launch {
-            val realDuration = if (isVideo) {
-                withContext(Dispatchers.IO) { probeMediaDurationMs(uri, 5_000L) }
-            } else {
-                5_000L
+            val probed = withContext(Dispatchers.IO) {
+                MediaProbeHelper.probeMedia(getApplication(), uri, hintIsVideo = isVideoHint, fallbackDurationMs = 5_000L)
             }
+            val isVideo = probed.isVideo
+            val realDuration = if (isVideo) probed.durationMs else 5_000L
+            val sourceDur = if (isVideo) realDuration else 0L
+            val resolvedLabel = label ?: if (isVideo) "ভিডিও ক্লিপ" else "ছবি ক্লিপ"
             val proj = _project.value ?: return@launch
             val videoClips = proj.clips.filter { it.trackType == TrackType.VIDEO && it.laneIndex == 0 }
             val startAt = videoClips.maxOfOrNull { it.endMs } ?: 0L
@@ -576,15 +622,22 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             val clip = TimelineClip(
                 trackType = TrackType.VIDEO,
                 laneIndex = lane,
-                title = label.take(24),
+                title = resolvedLabel.take(24),
                 startMs = startAt,
                 durationMs = realDuration,
-                audioConfig = AudioConfig(volume = if (isVideo) 1.0f else 0f),
-                mediaSource = MediaSource(uriString = uri.toString(), isVideo = isVideo, label = label)
+                sourceDurationMs = sourceDur,
+                trimStartMs = 0L,
+                playbackSpeed = 1.0f,
+                audioConfig = AudioConfig(
+                    volume = if (isVideo && probed.hasAudio) 1.0f else if (isVideo) 1.0f else 0f,
+                    fadeInMs = 50L,
+                    fadeOutMs = 120L
+                ),
+                mediaSource = MediaSource(uriString = uri.toString(), isVideo = isVideo, label = resolvedLabel)
             )
             commitProject(proj.copy(clips = proj.clips + clip))
             _selectedClipId.value = clip.id
-            _playheadMs.value = clip.startMs + 200L
+            seekTo(clip.startMs)
         }
     }
 
@@ -820,6 +873,43 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         return latestProj.clips.firstOrNull { it.id == _selectedClipId.value }
     }
 
+    fun addOrUpdateMapAnimationClip(
+        mapConfig: com.example.domain.map.UniversalMapConfig,
+        existingClipId: String? = null
+    ) {
+        val proj = _project.value ?: return
+        val existing = existingClipId?.let { id -> proj.clips.firstOrNull { it.id == id && it.mapConfig != null } }
+        if (existing != null) {
+            val updated = proj.clips.map { clip ->
+                if (clip.id == existing.id) {
+                    clip.copy(
+                        title = mapConfig.title.take(22).ifBlank { "ম্যাপ অ্যানিমেশন" },
+                        mapConfig = mapConfig
+                    )
+                } else clip
+            }
+            commitProject(proj.copy(clips = updated))
+            _selectedClipId.value = existing.id
+        } else {
+            val startAt = _playheadMs.value
+            val dur = mapConfig.durationMs.coerceIn(2_000L, 60_000L)
+            val lane = findFreeLaneIndex(proj.clips, TrackType.GRAPHICS, startAt, startAt + dur)
+            val clip = TimelineClip(
+                trackType = TrackType.GRAPHICS,
+                laneIndex = lane,
+                title = mapConfig.title.take(22).ifBlank { "ম্যাপ অ্যানিমেশন" },
+                startMs = startAt,
+                durationMs = dur,
+                sourceDurationMs = dur,
+                inAnimationId = "in_fade",
+                outAnimationId = "out_fade",
+                mapConfig = mapConfig
+            )
+            commitProject(proj.copy(clips = proj.clips + clip))
+            _selectedClipId.value = clip.id
+        }
+    }
+
     fun generateAutoDocumentaryIntoCurrent(topic: String, scriptNote: String) {
         val proj = _project.value ?: return
         val generated = PresetCatalog.buildAutoInvestigativeDocumentary(topic, scriptNote)
@@ -837,12 +927,14 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     fun addAudioClip(uri: Uri?, label: String, isVoiceover: Boolean, recordedPath: String? = null, durationMs: Long = 6_000L) {
         viewModelScope.launch {
             val resolvedDuration = if (uri != null && recordedPath == null) {
-                withContext(Dispatchers.IO) { probeMediaDurationMs(uri, durationMs) }
+                withContext(Dispatchers.IO) {
+                    MediaProbeHelper.probeDurationMs(getApplication(), uri, fallbackMs = durationMs)
+                }
             } else {
                 durationMs
             }
             val proj = _project.value ?: return@launch
-            val safeDur = resolvedDuration.coerceIn(1_000L, 600_000L)
+            val safeDur = resolvedDuration.coerceIn(500L, MediaProbeHelper.MAX_TIMELINE_DURATION_MS)
             val track = if (isVoiceover) TrackType.VOICEOVER else TrackType.MUSIC
             val startAt = _playheadMs.value
             val lane = findFreeLaneIndex(proj.clips, track, startAt, startAt + safeDur)
@@ -852,8 +944,13 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
                 title = label,
                 startMs = startAt,
                 durationMs = safeDur,
+                sourceDurationMs = safeDur,
+                trimStartMs = 0L,
+                playbackSpeed = 1.0f,
                 audioConfig = AudioConfig(
                     volume = if (isVoiceover) 1.15f else 0.78f,
+                    fadeInMs = 80L,
+                    fadeOutMs = 150L,
                     autoDuckingEnabled = !isVoiceover,
                     noiseReductionEnabled = isVoiceover,
                     audioPath = recordedPath ?: uri?.toString(),
@@ -865,28 +962,57 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun resyncAllMediaDurations() {
+        val proj = _project.value ?: return
+        viewModelScope.launch {
+            val updatedClips = withContext(Dispatchers.IO) {
+                proj.clips.map { clip ->
+                    val uriStr = clip.mediaSource?.uriString
+                        ?: clip.audioConfig.audioPath?.takeIf { it.startsWith("content://") || it.startsWith("file://") }
+                    if (uriStr != null && (clip.mediaSource?.isVideo == true || clip.trackType == TrackType.MUSIC || clip.trackType == TrackType.VOICEOVER)) {
+                        val probed = MediaProbeHelper.probeMedia(
+                            getApplication(),
+                            Uri.parse(uriStr),
+                            hintIsVideo = clip.mediaSource?.isVideo,
+                            fallbackDurationMs = clip.durationMs
+                        )
+                        val realSrcDur = probed.durationMs
+                        val expectedTimelineDur = if (clip.trimStartMs == 0L && clip.durationMs < realSrcDur && realSrcDur > 5_000L) {
+                            (realSrcDur / clip.playbackSpeed.coerceIn(0.25f, 4.0f)).toLong().coerceAtLeast(500L)
+                        } else {
+                            clip.durationMs
+                        }
+                        clip.copy(
+                            sourceDurationMs = realSrcDur,
+                            durationMs = expectedTimelineDur
+                        )
+                    } else {
+                        clip
+                    }
+                }
+            }
+            commitProject(proj.copy(clips = updatedClips), pushUndo = false)
+            _project.value?.let { refreshed ->
+                liveAudioEngine.syncToPlayhead(
+                    context = getApplication(),
+                    project = refreshed,
+                    playheadMs = _playheadMs.value,
+                    isPlaying = _isPlaying.value,
+                    forceSeek = true
+                )
+            }
+        }
+    }
+
     fun splitSelectedClipAtPlayhead() {
         val proj = _project.value ?: return
         val id = _selectedClipId.value ?: return
         val clip = proj.clips.firstOrNull { it.id == id } ?: return
         if (isClipLocked(proj, clip)) return
-        val splitAt = _playheadMs.value
-        if (splitAt <= clip.startMs + 350L || splitAt >= clip.endMs - 350L) return
-
-        val firstDur = splitAt - clip.startMs
-        val secondDur = clip.durationMs - firstDur
-        val firstHalf = clip.copy(durationMs = firstDur)
-        val secondHalf = clip.copy(
-            id = UUID.randomUUID().toString(),
-            startMs = splitAt,
-            durationMs = secondDur,
-            keyframes = clip.keyframes
-                .filter { it.timeOffsetMs >= firstDur }
-                .map { it.copy(timeOffsetMs = it.timeOffsetMs - firstDur) }
-        )
-        val newClips = proj.clips.flatMap { if (it.id == id) listOf(firstHalf, secondHalf) else listOf(it) }
+        val pair = splitClipAt(clip, _playheadMs.value) ?: return
+        val newClips = proj.clips.flatMap { if (it.id == id) listOf(pair.first, pair.second) else listOf(it) }
         commitProject(proj.copy(clips = newClips))
-        _selectedClipId.value = secondHalf.id
+        _selectedClipId.value = pair.second.id
     }
 
     fun duplicateClipSequentially(clipId: String) {
@@ -942,49 +1068,53 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun startExport(resolution: PreviewResolution, fps: ExportFps, fastMode: Boolean = true) {
+        startExport(
+            ExportConfiguration(
+                resolution = resolution,
+                fps = fps,
+                codec = ExportCodec.H264,
+                quality = if (fastMode) ExportQuality.MEDIUM else ExportQuality.HIGH,
+                mode = if (fastMode) ExportMode.FAST_EXPORT else ExportMode.HIGH_QUALITY
+            )
+        )
+    }
+
+    fun startExport(config: ExportConfiguration) {
         val proj = _project.value ?: return
         replayStopJob?.cancel()
         _isPlaying.value = false
         playbackJob?.cancel()
         liveAudioEngine.stop()
-        exportJob?.cancel()
-        exportJob = viewModelScope.launch {
-            _exportState.value = ExportUiState.Exporting(0.02f, "স্টুডিও রেন্ডার শুরু হচ্ছে...")
-            try {
-                val result = VideoExportEngine.exportProjectToMp4(
-                    context = getApplication(),
-                    project = proj,
-                    resolution = resolution,
-                    fpsOption = fps,
-                    fastMode = fastMode,
-                    onProgress = { progress, status ->
-                        _exportState.value = ExportUiState.Exporting(progress, status)
-                    }
-                )
-                _exportState.value = ExportUiState.Completed(result)
-            } catch (_: CancellationException) {
-                _exportState.value = ExportUiState.Idle
-            }
-        }
+        ExportCoordinator.startExport(getApplication(), proj, config)
+    }
+
+    fun toggleExportPause() {
+        ExportCoordinator.togglePause()
     }
 
     fun cancelExport() {
-        exportJob?.cancel()
-        exportJob = null
-        _exportState.value = ExportUiState.Idle
+        ExportCoordinator.cancelExport(getApplication())
+    }
+
+    fun retryFailedExport() {
+        ExportCoordinator.retryLastExport(getApplication(), _project.value)
+    }
+
+    fun dismissExportRecovery() {
+        ExportCoordinator.dismissRecoveryAndClean(getApplication())
     }
 
     fun dismissExportDialog() {
-        exportJob?.cancel()
-        exportJob = null
-        _exportState.value = ExportUiState.Idle
+        if (ExportCoordinator.state.value !is ExportCoordinatorState.Running) {
+            ExportCoordinator.resetToIdle()
+        }
     }
 
     override fun onCleared() {
         super.onCleared()
         replayStopJob?.cancel()
         playbackJob?.cancel()
-        exportJob?.cancel()
+        // Do NOT cancel ExportCoordinator here so background ForegroundService export survives navigation/minimization
         liveAudioEngine.stop()
         liveAudioEngine.clearCache()
         voiceoverRecorder.stopRecording()
@@ -993,7 +1123,86 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     companion object {
         fun computeTotalDurationMs(clips: List<TimelineClip>): Long {
             val maxEnd = clips.maxOfOrNull { it.endMs } ?: return 8_000L
-            return maxEnd.coerceIn(1_500L, 600_000L)
+            return maxEnd.coerceIn(1_500L, MediaProbeHelper.MAX_TIMELINE_DURATION_MS)
+        }
+
+        fun applyTrimToClip(clip: TimelineClip, newStartMs: Long, newDurationMs: Long): TimelineClip {
+            val speed = clip.playbackSpeed.coerceIn(0.25f, 4.0f)
+            if (clip.sourceDurationMs <= 0L) {
+                return clip.copy(
+                    startMs = newStartMs.coerceAtLeast(0L),
+                    durationMs = newDurationMs.coerceIn(200L, MediaProbeHelper.MAX_TIMELINE_DURATION_MS)
+                )
+            }
+            val oldEndMs = clip.endMs
+            val isLeftTrimDrag = (newStartMs != clip.startMs) && (kotlin.math.abs((newStartMs + newDurationMs) - oldEndMs) <= 4L)
+            return if (isLeftTrimDrag) {
+                val minStartFromSource = (clip.startMs - (clip.trimStartMs / speed).toLong()).coerceAtLeast(0L)
+                val maxStart = (oldEndMs - 200L).coerceAtLeast(minStartFromSource)
+                val clampedStart = newStartMs.coerceIn(minStartFromSource, maxStart)
+                val deltaStart = clampedStart - clip.startMs
+                val nextTrimStart = (clip.trimStartMs + (deltaStart * speed).toLong())
+                    .coerceIn(0L, (clip.sourceDurationMs - 200L).coerceAtLeast(0L))
+                val maxAllowedDur = if (clip.trackType == TrackType.MUSIC) {
+                    MediaProbeHelper.MAX_TIMELINE_DURATION_MS
+                } else {
+                    ((clip.sourceDurationMs - nextTrimStart) / speed).toLong().coerceAtLeast(200L)
+                }
+                val clampedDur = (oldEndMs - clampedStart).coerceIn(200L, maxAllowedDur)
+                clip.copy(startMs = clampedStart, durationMs = clampedDur, trimStartMs = nextTrimStart)
+            } else {
+                val safeStart = newStartMs.coerceAtLeast(0L)
+                val maxAllowedDur = if (clip.trackType == TrackType.MUSIC) {
+                    MediaProbeHelper.MAX_TIMELINE_DURATION_MS
+                } else {
+                    ((clip.sourceDurationMs - clip.trimStartMs) / speed).toLong().coerceAtLeast(200L)
+                }
+                val clampedDur = newDurationMs.coerceIn(200L, maxAllowedDur)
+                clip.copy(startMs = safeStart, durationMs = clampedDur)
+            }
+        }
+
+        fun splitClipAt(clip: TimelineClip, splitAtMs: Long): Pair<TimelineClip, TimelineClip>? {
+            if (splitAtMs <= clip.startMs + 350L || splitAtMs >= clip.endMs - 350L) return null
+            val firstDur = splitAtMs - clip.startMs
+            val secondDur = clip.durationMs - firstDur
+            val consumedSourceMs = SpeedRampEngine.computeRemappedVideoTimeMs(
+                profile = clip.speedRamp,
+                localMs = firstDur,
+                clipDurationMs = clip.durationMs,
+                baseSpeed = clip.playbackSpeed
+            )
+            val nextTrimStart = if (clip.sourceDurationMs > 0L) {
+                (clip.trimStartMs + consumedSourceMs).coerceIn(0L, (clip.sourceDurationMs - 200L).coerceAtLeast(0L))
+            } else {
+                clip.trimStartMs + consumedSourceMs
+            }
+            val firstHalf = clip.copy(durationMs = firstDur)
+            val secondHalf = clip.copy(
+                id = UUID.randomUUID().toString(),
+                startMs = splitAtMs,
+                durationMs = secondDur,
+                trimStartMs = nextTrimStart,
+                keyframes = clip.keyframes
+                    .filter { it.timeOffsetMs >= firstDur }
+                    .map { it.copy(timeOffsetMs = it.timeOffsetMs - firstDur) }
+            )
+            return firstHalf to secondHalf
+        }
+
+        fun computeSpeedAdjustedClip(clip: TimelineClip, newSpeed: Float): TimelineClip {
+            val safeSpeed = newSpeed.coerceIn(0.25f, 3.0f)
+            if (clip.sourceDurationMs <= 0L) {
+                val oldSpeed = clip.playbackSpeed.coerceIn(0.25f, 3.0f)
+                val rescaledDur = ((clip.durationMs * oldSpeed) / safeSpeed).toLong()
+                    .coerceIn(200L, MediaProbeHelper.MAX_TIMELINE_DURATION_MS)
+                return clip.copy(playbackSpeed = safeSpeed, durationMs = rescaledDur)
+            }
+            val currentSpan = (clip.trimEndMs - clip.trimStartMs)
+                .takeIf { it >= 200L }
+                ?: (clip.sourceDurationMs - clip.trimStartMs).coerceAtLeast(200L)
+            val newDur = (currentSpan / safeSpeed).toLong().coerceIn(200L, MediaProbeHelper.MAX_TIMELINE_DURATION_MS)
+            return clip.copy(playbackSpeed = safeSpeed, durationMs = newDur)
         }
     }
 }

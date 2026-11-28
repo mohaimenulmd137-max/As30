@@ -357,4 +357,302 @@ class StudioEnginesTest {
         assertEquals(fpBase, fpText)
         assertTrue(fpBase != fpAudio)
     }
+
+    @Test
+    fun `computeTotalDurationMs supports multi-minute and multi-hour clips without 10-minute truncation`() {
+        val fiveMinClip = TimelineClip(
+            trackType = TrackType.VIDEO,
+            title = "5m Documentary",
+            startMs = 0L,
+            durationMs = 300_000L,
+            sourceDurationMs = 300_000L
+        )
+        assertEquals(300_000L, com.example.ui.editor.EditorViewModel.computeTotalDurationMs(listOf(fiveMinClip)))
+
+        val twentyMinClip = TimelineClip(
+            trackType = TrackType.VIDEO,
+            title = "20m Lecture",
+            startMs = 0L,
+            durationMs = 1_200_000L,
+            sourceDurationMs = 1_200_000L
+        )
+        assertEquals(1_200_000L, com.example.ui.editor.EditorViewModel.computeTotalDurationMs(listOf(twentyMinClip)))
+    }
+
+    @Test
+    fun `TimelineClip computeSourcePositionMs respects trimStartMs, playbackSpeed, and bounds`() {
+        val trimmedClip = TimelineClip(
+            trackType = TrackType.VIDEO,
+            title = "Trimmed",
+            startMs = 2_000L,
+            durationMs = 10_000L,
+            sourceDurationMs = 60_000L,
+            trimStartMs = 15_000L,
+            playbackSpeed = 1.5f
+        )
+        assertEquals(15_000L, trimmedClip.computeSourcePositionMs(2_000L))
+        // 4_000ms timeline elapsed at 1.5x => +6_000ms source => 21_000ms
+        assertEquals(21_000L, trimmedClip.computeSourcePositionMs(6_000L))
+        assertEquals(30_000L, trimmedClip.trimEndMs)
+    }
+
+    @Test
+    fun `applyTrimToClip updates trimStartMs on left-trim and clamps video duration to remaining source`() {
+        val videoClip = TimelineClip(
+            trackType = TrackType.VIDEO,
+            title = "Video 30s",
+            startMs = 0L,
+            durationMs = 30_000L,
+            sourceDurationMs = 30_000L,
+            trimStartMs = 0L,
+            playbackSpeed = 1.0f
+        )
+        // Drag left handle right by 5s (endMs stays 30_000L)
+        val leftTrimmed = com.example.ui.editor.EditorViewModel.applyTrimToClip(
+            clip = videoClip,
+            newStartMs = 5_000L,
+            newDurationMs = 25_000L
+        )
+        assertEquals(5_000L, leftTrimmed.startMs)
+        assertEquals(25_000L, leftTrimmed.durationMs)
+        assertEquals(5_000L, leftTrimmed.trimStartMs)
+
+        // Try extending right handle past remaining 25s source -> clamped to 25_000L
+        val overExtended = com.example.ui.editor.EditorViewModel.applyTrimToClip(
+            clip = leftTrimmed,
+            newStartMs = 5_000L,
+            newDurationMs = 90_000L
+        )
+        assertEquals(25_000L, overExtended.durationMs)
+
+        // Music clips can loop past sourceDurationMs
+        val musicClip = videoClip.copy(trackType = TrackType.MUSIC, trimStartMs = 0L, durationMs = 30_000L)
+        val extendedMusic = com.example.ui.editor.EditorViewModel.applyTrimToClip(
+            clip = musicClip,
+            newStartMs = 0L,
+            newDurationMs = 90_000L
+        )
+        assertEquals(90_000L, extendedMusic.durationMs)
+    }
+
+    @Test
+    fun `splitClipAt advances trimStartMs on second half so playback never restarts at zero`() {
+        val clip = TimelineClip(
+            trackType = TrackType.VIDEO,
+            title = "Long Clip",
+            startMs = 1_000L,
+            durationMs = 20_000L,
+            sourceDurationMs = 60_000L,
+            trimStartMs = 10_000L,
+            playbackSpeed = 1.0f
+        )
+        val pair = com.example.ui.editor.EditorViewModel.splitClipAt(clip, 7_000L)!!
+        val (first, second) = pair
+        assertEquals(1_000L, first.startMs)
+        assertEquals(6_000L, first.durationMs)
+        assertEquals(10_000L, first.trimStartMs)
+
+        assertEquals(7_000L, second.startMs)
+        assertEquals(14_000L, second.durationMs)
+        assertEquals(16_000L, second.trimStartMs)
+        assertEquals(16_000L, second.computeSourcePositionMs(7_000L))
+    }
+
+    @Test
+    fun `computeSpeedAdjustedClip rescales timeline duration proportionally`() {
+        val clip = TimelineClip(
+            trackType = TrackType.VIDEO,
+            title = "Speed Test",
+            startMs = 0L,
+            durationMs = 20_000L,
+            sourceDurationMs = 20_000L,
+            trimStartMs = 0L,
+            playbackSpeed = 1.0f
+        )
+        val doubleSpeed = com.example.ui.editor.EditorViewModel.computeSpeedAdjustedClip(clip, 2.0f)
+        assertEquals(2.0f, doubleSpeed.playbackSpeed, 0.001f)
+        assertEquals(10_000L, doubleSpeed.durationMs)
+
+        val halfSpeed = com.example.ui.editor.EditorViewModel.computeSpeedAdjustedClip(doubleSpeed, 0.5f)
+        assertEquals(0.5f, halfSpeed.playbackSpeed, 0.001f)
+        assertEquals(40_000L, halfSpeed.durationMs)
+    }
+
+    @Test
+    fun `map preset catalog covers all 6 categories with regions routes markers and keyframes`() {
+        val categoriesPresent = com.example.domain.map.MapPresetCatalog.presets.map { it.category }.toSet()
+        assertEquals(com.example.domain.map.MapPresetCategory.entries.toSet(), categoriesPresent)
+        assertTrue(com.example.domain.map.MapPresetCatalog.presets.all { it.config.keyframes.isNotEmpty() })
+    }
+
+    @Test
+    fun `world cartography camera flight dips zoom mid-arc and interpolates coordinates`() {
+        val config = com.example.domain.map.UniversalMapConfig(
+            keyframes = listOf(
+                com.example.domain.map.MapCameraKeyframe("k1", "Dhaka", 0f, 23.81f, 90.41f, 4.0f, 0f, 0f, com.example.domain.map.MapCameraEasing.LINEAR),
+                com.example.domain.map.MapCameraKeyframe("k2", "London", 1f, 51.51f, -0.13f, 4.0f, 10f, 20f, com.example.domain.map.MapCameraEasing.CINEMA_FLIGHT)
+            )
+        )
+        val start = com.example.domain.map.WorldCartographyData.evaluateCameraAt(config, 0f)
+        val mid = com.example.domain.map.WorldCartographyData.evaluateCameraAt(config, 0.5f)
+        val end = com.example.domain.map.WorldCartographyData.evaluateCameraAt(config, 1f)
+
+        assertEquals(23.81f, start.centerLat, 0.01f)
+        assertEquals(51.51f, end.centerLat, 0.01f)
+        assertTrue("CINEMA_FLIGHT should dip zoom mid-flight", mid.zoom < 4.0f)
+        assertTrue(mid.centerLat in 23.8f..51.6f)
+    }
+
+    @Test
+    fun `projectLatLon and unprojectScreenPoint roundtrip accurately in both 2D and 3D Globe modes`() {
+        val camera = com.example.domain.map.EvaluatedMapCamera(
+            centerLat = 23.81f,
+            centerLon = 90.41f,
+            zoom = 2.5f,
+            rotationDeg = 12f,
+            tiltDeg = 15f
+        )
+        val w = 1280f
+        val h = 720f
+        val dhakaLat = 23.8103f
+        val dhakaLon = 90.4125f
+
+        // 2D World Map round-trip
+        val p2d = com.example.domain.map.WorldCartographyData.projectLatLon(
+            dhakaLat, dhakaLon, camera, com.example.domain.map.MapProjectionMode.WORLD_2D, w, h
+        )
+        assertTrue(p2d.visible)
+        val back2d = com.example.domain.map.WorldCartographyData.unprojectScreenPoint(
+            p2d.x, p2d.y, camera, com.example.domain.map.MapProjectionMode.WORLD_2D, w, h
+        )!!
+        assertEquals(dhakaLat, back2d.lat, 0.2f)
+        assertEquals(dhakaLon, back2d.lon, 0.2f)
+
+        // 3D Globe round-trip + backface culling
+        val p3d = com.example.domain.map.WorldCartographyData.projectLatLon(
+            dhakaLat, dhakaLon, camera, com.example.domain.map.MapProjectionMode.GLOBE_3D, w, h
+        )
+        assertTrue(p3d.visible)
+        val back3d = com.example.domain.map.WorldCartographyData.unprojectScreenPoint(
+            p3d.x, p3d.y, camera, com.example.domain.map.MapProjectionMode.GLOBE_3D, w, h
+        )!!
+        assertEquals(dhakaLat, back3d.lat, 0.35f)
+        assertEquals(dhakaLon, back3d.lon, 0.35f)
+
+        // Antipode behind globe must be hidden
+        val antipode = com.example.domain.map.WorldCartographyData.projectLatLon(
+            -23.81f, -89.59f, camera, com.example.domain.map.MapProjectionMode.GLOBE_3D, w, h
+        )
+        assertTrue(!antipode.visible)
+
+        // Geodesic interpolation passes smoothly between Dhaka and London
+        val arc = com.example.domain.map.WorldCartographyData.interpolateGeodesic(
+            com.example.domain.map.MapLatLon(23.81f, 90.41f),
+            com.example.domain.map.MapLatLon(51.51f, -0.13f),
+            steps = 16
+        )
+        assertEquals(17, arc.size)
+        assertTrue(arc[8].lat > 37f)
+    }
+
+    @Test
+    fun `export dimensions and target bitrates scale cleanly across 720p to 4K and H264 vs H265`() {
+        val (w720, h720) = com.example.domain.engine.export.DeviceCapabilityAnalyzer.computeExportDimensions(
+            com.example.domain.model.AspectRatioPreset.LANDSCAPE_16_9,
+            com.example.domain.model.PreviewResolution.P720
+        )
+        assertEquals(1280, w720)
+        assertEquals(720, h720)
+
+        val (w1440, h1440) = com.example.domain.engine.export.DeviceCapabilityAnalyzer.computeExportDimensions(
+            com.example.domain.model.AspectRatioPreset.LANDSCAPE_16_9,
+            com.example.domain.model.PreviewResolution.QHD1440
+        )
+        assertEquals(2560, w1440)
+        assertEquals(1440, h1440)
+
+        val (w4k, h4k) = com.example.domain.engine.export.DeviceCapabilityAnalyzer.computeExportDimensions(
+            com.example.domain.model.AspectRatioPreset.PORTRAIT_9_16,
+            com.example.domain.model.PreviewResolution.UHD4K
+        )
+        assertEquals(2160, w4k)
+        assertEquals(3840, h4k)
+
+        val h264Rate = com.example.domain.engine.export.DeviceCapabilityAnalyzer.computeTargetBitrate(
+            com.example.domain.model.PreviewResolution.P1080,
+            com.example.domain.model.ExportFps.FPS30,
+            com.example.domain.engine.export.ExportCodec.H264,
+            com.example.domain.engine.export.ExportQuality.HIGH,
+            com.example.domain.engine.export.ExportMode.SMART_AUTO
+        )
+        val h265Rate = com.example.domain.engine.export.DeviceCapabilityAnalyzer.computeTargetBitrate(
+            com.example.domain.model.PreviewResolution.P1080,
+            com.example.domain.model.ExportFps.FPS30,
+            com.example.domain.engine.export.ExportCodec.H265,
+            com.example.domain.engine.export.ExportQuality.HIGH,
+            com.example.domain.engine.export.ExportMode.SMART_AUTO
+        )
+        assertTrue("H265 should target smaller bitrate (~72%) than H264", h265Rate < h264Rate)
+    }
+
+    @Test
+    fun `smart auto export configuration adapts safely to low-ram and multi-hour 5-6 GB scenarios`() {
+        val lowRamReport = com.example.domain.engine.export.EncoderCapabilityReport(
+            supportedResolutions = setOf(com.example.domain.model.PreviewResolution.P720, com.example.domain.model.PreviewResolution.P1080),
+            supportedFpsByResolution = mapOf(
+                com.example.domain.model.PreviewResolution.P720 to setOf(com.example.domain.model.ExportFps.FPS24, com.example.domain.model.ExportFps.FPS30),
+                com.example.domain.model.PreviewResolution.P1080 to setOf(com.example.domain.model.ExportFps.FPS30)
+            ),
+            supportedCodecs = setOf(com.example.domain.engine.export.ExportCodec.H264),
+            hasHardwareH264 = true,
+            hasHardwareH265 = false,
+            preferredEncoderH264 = null,
+            preferredEncoderH265 = null,
+            glesVersion = "GLES 3.0",
+            totalRamMb = 2048L,
+            availableRamMb = 400L,
+            heapLimitMb = 256L,
+            isLowRamDevice = true
+        )
+        val longProj = StudioProject(name = "2h Documentary", totalDurationMs = 7_200_000L, previewResolution = com.example.domain.model.PreviewResolution.UHD4K)
+        val lowCfg = com.example.domain.engine.export.DeviceCapabilityAnalyzer.resolveSmartAutoConfig(lowRamReport, longProj)
+        assertEquals(com.example.domain.model.PreviewResolution.P720, lowCfg.resolution)
+        assertEquals(com.example.domain.model.ExportFps.FPS30, lowCfg.fps)
+        assertEquals(com.example.domain.engine.export.ExportQuality.MEDIUM, lowCfg.quality)
+
+        val highRamHevcReport = lowRamReport.copy(
+            supportedResolutions = setOf(com.example.domain.model.PreviewResolution.P720, com.example.domain.model.PreviewResolution.P1080, com.example.domain.model.PreviewResolution.UHD4K),
+            supportedCodecs = setOf(com.example.domain.engine.export.ExportCodec.H264, com.example.domain.engine.export.ExportCodec.H265),
+            hasHardwareH265 = true,
+            totalRamMb = 8192L,
+            availableRamMb = 4200L,
+            heapLimitMb = 512L,
+            isLowRamDevice = false
+        )
+        val highCfg = com.example.domain.engine.export.DeviceCapabilityAnalyzer.resolveSmartAutoConfig(highRamHevcReport, longProj)
+        assertEquals(com.example.domain.engine.export.ExportCodec.H265, highCfg.codec)
+    }
+
+    @Test
+    fun `storage estimator accurately predicts 5-6+ GB multi-hour exports and calculates power-of-two bitmap subsampling`() {
+        // 1.5 hours at ~9.5 Mbps ~ 6.4+ GB
+        val est5PlusGb = com.example.domain.engine.export.ExportStorageManager.estimateOutputBytes(
+            durationMs = 5_400_000L,
+            videoBitrateBps = 9_500_000
+        )
+        assertTrue("Expected > 5 GB estimate, got $est5PlusGb", est5PlusGb > 5L * 1024L * 1024L * 1024L)
+        assertTrue(com.example.domain.engine.export.ExportStorageManager.formatBytesReadable(est5PlusGb).endsWith("GB"))
+
+        // 48MP photo downsampled to 1920x1080 should use inSampleSize >= 4 to protect 256MB heap
+        val sample48Mp = com.example.domain.engine.export.MemorySafeMediaFrameProvider.calculateInSampleSize(
+            rawW = 8000,
+            rawH = 6000,
+            reqW = 1920,
+            reqH = 1080
+        )
+        assertTrue("Expected sample size >= 4, got $sample48Mp", sample48Mp >= 4)
+        assertEquals(0, sample48Mp and (sample48Mp - 1)) // Power of 2
+    }
 }
+
+

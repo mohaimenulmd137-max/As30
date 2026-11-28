@@ -52,9 +52,12 @@ import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Subtitles
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -91,6 +94,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.domain.engine.MediaProbeHelper
 import com.example.domain.model.AspectRatioPreset
 import com.example.domain.model.InvestigativeToolType
 import com.example.domain.model.LowerThirdTemplate
@@ -127,6 +131,8 @@ fun EditorScreen(
     val canRedo by viewModel.canRedo.collectAsStateWithLifecycle()
     val isBangla by viewModel.isBanglaUi.collectAsStateWithLifecycle()
     val exportState by viewModel.exportState.collectAsStateWithLifecycle()
+    val capabilityReport by viewModel.capabilityReport.collectAsStateWithLifecycle()
+    val exportRecoveryRecord by viewModel.exportRecoveryRecord.collectAsStateWithLifecycle()
     val userAnimationPresets by viewModel.userAnimationPresets.collectAsStateWithLifecycle()
     val beforeAfterBypassAnim by viewModel.beforeAfterBypassAnim.collectAsStateWithLifecycle()
     val copiedKeyframe by viewModel.copiedKeyframe.collectAsStateWithLifecycle()
@@ -143,9 +149,12 @@ fun EditorScreen(
     var pendingFontClipId by remember { mutableStateOf<String?>(null) }
     var showChartStudioDialog by remember { mutableStateOf(false) }
     var showMapStudioDialog by remember { mutableStateOf(false) }
+    var showUniversalMapStudio by remember { mutableStateOf(false) }
     var showGuideDialog by remember { mutableStateOf(false) }
+    var showTimelineSyncDialog by remember { mutableStateOf(false) }
     var chartStudioClipId by remember { mutableStateOf<String?>(null) }
     var mapStudioClipId by remember { mutableStateOf<String?>(null) }
+    var universalMapEditClipId by remember { mutableStateOf<String?>(null) }
 
     val context = LocalContext.current
 
@@ -157,8 +166,12 @@ fun EditorScreen(
                 context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
             val mime = context.contentResolver.getType(uri) ?: ""
-            val isVideo = mime.startsWith("video/")
-            viewModel.addMediaClip(uri, isVideo, if (isVideo) "ভিডিও ক্লিপ" else "ছবি ক্লিপ")
+            val isVideoHint = when {
+                mime.startsWith("video/") -> true
+                mime.startsWith("image/") -> false
+                else -> null // Auto-detect via MediaExtractor / MMR inside MediaProbeHelper
+            }
+            viewModel.addMediaClip(uri, isVideoHint = isVideoHint, label = null)
         }
     }
 
@@ -417,15 +430,12 @@ fun EditorScreen(
                         }
                     )
                     DropdownMenuItem(
-                        text = { Text(if (isBangla) "🗺️ ম্যাপ রাডার স্টুডিও" else "Map Radar Studio", color = EmeraldAudio, fontWeight = FontWeight.SemiBold) },
+                        text = { Text(if (isBangla) "🗺️ ইউনিভার্সাল ম্যাপ স্টুডিও" else "🗺️ Map Animation Studio", color = EmeraldAudio, fontWeight = FontWeight.SemiBold) },
                         leadingIcon = { Icon(Icons.Default.Search, null, tint = EmeraldAudio) },
                         onClick = {
                             showMediaMenu = false
-                            viewModel.ensureMapClipForStudio()?.let {
-                                mapStudioClipId = it.id
-                                showMapStudioDialog = true
-                            }
-                            activeToolSection = ProToolSection.OVERLAY_PRO
+                            universalMapEditClipId = selectedClip?.takeIf { it.mapConfig != null }?.id
+                            showUniversalMapStudio = true
                         }
                     )
                     DropdownMenuItem(
@@ -524,7 +534,7 @@ fun EditorScreen(
                 )
             }
 
-            Box(modifier = Modifier.weight(1.05f)) {
+            Box(modifier = Modifier.weight(1.02f)) {
                 QuickCategoryPill(
                     icon = Icons.Default.Subtitles,
                     label = if (isBangla) "সাবটাইটেল" else "Subtitles",
@@ -536,6 +546,22 @@ fun EditorScreen(
                     onClick = {
                         viewModel.addTextClip(LowerThirdTemplate.DOCUMENTARY_DATE_CARD)
                         activeToolSection = ProToolSection.TEXT_FONT
+                    }
+                )
+            }
+
+            Box(modifier = Modifier.weight(1.12f)) {
+                QuickCategoryPill(
+                    icon = null,
+                    label = if (isBangla) "🗺️ ম্যাপ" else "🗺️ Map",
+                    hasArrow = false,
+                    containerColor = Color(0xFF0E261E),
+                    borderColor = EmeraldAudio.copy(alpha = 0.8f),
+                    contentColor = EmeraldAudio,
+                    tag = "map_animation_button",
+                    onClick = {
+                        universalMapEditClipId = selectedClip?.takeIf { it.mapConfig != null }?.id
+                        showUniversalMapStudio = true
                     }
                 )
             }
@@ -588,16 +614,26 @@ fun EditorScreen(
                     modifier = Modifier.padding(horizontal = 7.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color(0xFF6BB5FF), modifier = Modifier.size(13.dp))
+                    Icon(if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, contentDescription = null, tint = Color(0xFF6BB5FF), modifier = Modifier.size(13.dp))
                     Spacer(modifier = Modifier.width(2.dp))
                     Text(
-                        text = if (isBangla) "এ পর্যন্ত (%.1fs)".format(playheadMs / 1000f) else "At %.1fs".format(playheadMs / 1000f),
+                        text = "${MediaProbeHelper.formatDurationReadable(playheadMs)} / ${MediaProbeHelper.formatDurationReadable(currentProject.totalDurationMs)}",
                         fontSize = 10.sp,
                         color = Color(0xFF9ECBFF),
                         maxLines = 1
                     )
                 }
             }
+
+            StatusTogglePill(
+                icon = Icons.Default.Sync,
+                label = if (isBangla) "সিঙ্ক চেক" else "Sync",
+                active = showTimelineSyncDialog,
+                activeContainer = Color(0xFF0E2630),
+                activeBorder = CyanPlayhead.copy(alpha = 0.65f),
+                activeContent = CyanPlayhead,
+                onClick = { showTimelineSyncDialog = true }
+            )
 
             StatusTogglePill(
                 icon = Icons.Default.AutoAwesome,
@@ -788,9 +824,12 @@ fun EditorScreen(
                         }
                     },
                     onOpenMapStudio = {
-                        viewModel.ensureMapClipForStudio()?.let {
-                            mapStudioClipId = it.id
+                        if (selectedClip?.investigativeConfig?.toolType == InvestigativeToolType.MAP_RADAR_ROUTE) {
+                            mapStudioClipId = selectedClip.id
                             showMapStudioDialog = true
+                        } else {
+                            universalMapEditClipId = selectedClip?.takeIf { it.mapConfig != null }?.id
+                            showUniversalMapStudio = true
                         }
                     },
                     onPickAudioFile = { audioPickerLauncher.launch(arrayOf("audio/*")) },
@@ -801,6 +840,7 @@ fun EditorScreen(
                     onVoiceoverRecorded = { path, dur ->
                         viewModel.addAudioClip(null, "ভয়েসওভার রেকর্ড", isVoiceover = true, recordedPath = path, durationMs = dur)
                     },
+                    onUpdateSpeed = { id, spd -> viewModel.updateClipPlaybackSpeed(id, spd) },
                     onClose = { activeToolSection = null }
                 )
             }
@@ -907,14 +947,19 @@ fun EditorScreen(
         }
     }
 
-    if (showExportDialog || exportState !is ExportUiState.Idle) {
+    if (showExportDialog || exportState is ExportUiState.Completed) {
         ExportDialog(
-            initialResolution = currentProject.previewResolution,
-            totalDurationMs = currentProject.totalDurationMs,
+            project = currentProject,
+            capabilityReport = capabilityReport,
+            recoveryRecord = exportRecoveryRecord,
             exportState = exportState,
             isBangla = isBangla,
-            onStartExport = { res, fps, fastMode -> viewModel.startExport(res, fps, fastMode) },
+            onRefreshCapabilities = { viewModel.refreshDeviceCapabilities() },
+            onStartExport = { cfg -> viewModel.startExport(cfg) },
+            onTogglePause = { viewModel.toggleExportPause() },
             onCancelExport = { viewModel.cancelExport() },
+            onRetryExport = { viewModel.retryFailedExport() },
+            onDismissRecovery = { viewModel.dismissExportRecovery() },
             onDismiss = {
                 showExportDialog = false
                 viewModel.dismissExportDialog()
@@ -926,6 +971,18 @@ fun EditorScreen(
         StudioGuideDialog(
             isBangla = isBangla,
             onDismiss = { showGuideDialog = false }
+        )
+    }
+
+    if (showTimelineSyncDialog) {
+        TimelineSyncDiagnosticsDialog(
+            project = currentProject,
+            playheadMs = playheadMs,
+            isPlaying = isPlaying,
+            isBangla = isBangla,
+            onResyncAll = { viewModel.resyncAllMediaDurations() },
+            onSeekTo = { ms -> viewModel.seekTo(ms) },
+            onDismiss = { showTimelineSyncDialog = false }
         )
     }
 
@@ -993,6 +1050,23 @@ fun EditorScreen(
                     }
                 }
                 showMapStudioDialog = false
+            }
+        )
+    }
+
+    if (showUniversalMapStudio) {
+        val existingMapClip = universalMapEditClipId?.let { id ->
+            currentProject.clips.firstOrNull { it.id == id && it.mapConfig != null }
+        }
+        com.example.ui.map.UniversalMapStudioDialog(
+            initialConfig = existingMapClip?.mapConfig,
+            aspectRatio = currentProject.aspectRatio,
+            resolution = currentProject.previewResolution,
+            isBangla = isBangla,
+            onDismiss = { showUniversalMapStudio = false },
+            onAddOrUpdateTimelineClip = { updatedMapConfig ->
+                viewModel.addOrUpdateMapAnimationClip(updatedMapConfig, existingMapClip?.id)
+                showUniversalMapStudio = false
             }
         )
     }
@@ -1219,3 +1293,134 @@ fun AutoDocumentaryBuilderDialog(
         }
     )
 }
+
+@Composable
+private fun TimelineSyncDiagnosticsDialog(
+    project: com.example.domain.model.StudioProject,
+    playheadMs: Long,
+    isPlaying: Boolean,
+    isBangla: Boolean,
+    onResyncAll: () -> Unit,
+    onSeekTo: (Long) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val totalStr = MediaProbeHelper.formatDurationReadable(project.totalDurationMs)
+    val playheadStr = MediaProbeHelper.formatDurationReadable(playheadMs)
+    val mediaClips = remember(project.clips) {
+        project.clips.filter {
+            it.mediaSource?.isVideo == true || it.trackType == TrackType.VOICEOVER || it.trackType == TrackType.MUSIC
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = StudioSurfaceElevated,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(Icons.Default.Sync, contentDescription = null, tint = CyanPlayhead)
+                Text(
+                    text = if (isBangla) "টাইমলাইন ও A/V সিঙ্ক স্ট্যাটাস" else "Timeline & A/V Sync Status",
+                    color = AmberDocumentary,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Surface(
+                    color = StudioObsidian,
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, CyanPlayhead.copy(alpha = 0.45f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            text = if (isBangla) "মোট টাইমলাইন দৈর্ঘ্য: $totalStr (${project.clips.size} ক্লিপ)" else "Total Timeline: $totalStr (${project.clips.size} clips)",
+                            color = TextPrimary,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = if (isBangla) "প্লেহেড: $playheadStr · অবস্থা: ${if (isPlaying) "চলছে (ওয়াল-ক্লক 1x)" else "বিরতি"}" else "Playhead: $playheadStr · State: ${if (isPlaying) "Playing" else "Paused"}",
+                            color = CyanPlayhead,
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                        Text(
+                            text = if (isBangla) "মাস্টার ভলিউম: ${(project.masterVolume * 100).toInt()}% · সর্বোচ্চ সীমা: ২ ঘণ্টা" else "Master Vol: ${(project.masterVolume * 100).toInt()}% · Max: 2h",
+                            color = EmeraldAudio,
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    }
+                }
+
+                if (mediaClips.isEmpty()) {
+                    Text(
+                        text = if (isBangla) "কোনো ভিডিও বা অডিও ক্লিপ এখনও যোগ করা হয়নি।" else "No video or audio clips added yet.",
+                        color = TextSecondary,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                } else {
+                    mediaClips.forEach { c ->
+                        val tlRange = "${MediaProbeHelper.formatDurationReadable(c.startMs)}–${MediaProbeHelper.formatDurationReadable(c.endMs)}"
+                        val srcDur = if (c.sourceDurationMs > 0L) MediaProbeHelper.formatDurationReadable(c.sourceDurationMs) else MediaProbeHelper.formatDurationReadable(c.durationMs)
+                        val trimRange = "${MediaProbeHelper.formatDurationReadable(c.trimStartMs)}–${MediaProbeHelper.formatDurationReadable(c.trimEndMs)}"
+                        val audioStatus = when {
+                            c.audioConfig.isMuted -> if (isBangla) "মিউট" else "Muted"
+                            c.audioConfig.isSolo -> if (isBangla) "সোলো (${(c.audioConfig.volume * 100).toInt()}%)" else "Solo (${(c.audioConfig.volume * 100).toInt()}%)"
+                            else -> "${(c.audioConfig.volume * 100).toInt()}%"
+                        }
+                        Surface(
+                            onClick = { onSeekTo(c.startMs) },
+                            color = StudioSurface,
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, StudioBorder),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(
+                                    text = "${c.trackType.labelBn}: ${c.title}",
+                                    color = AmberDocumentary,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = if (isBangla) "সোর্স: $srcDur · ট্রিম: $trimRange · স্পিড: %.2fx".format(c.playbackSpeed) else "Src: $srcDur · Trim: $trimRange · %.2fx".format(c.playbackSpeed),
+                                    color = TextPrimary,
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                                Text(
+                                    text = if (isBangla) "টাইমলাইন: $tlRange · অডিও: $audioStatus" else "Timeline: $tlRange · Audio: $audioStatus",
+                                    color = TextSecondary,
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onResyncAll,
+                colors = ButtonDefaults.buttonColors(containerColor = CyanPlayhead, contentColor = StudioObsidian),
+                modifier = Modifier.testTag("resync_media_button")
+            ) {
+                Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(if (isBangla) "ডিউরেশন রিসিঙ্ক" else "Resync Durations", fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(if (isBangla) "বন্ধ করুন" else "Close", color = TextSecondary)
+            }
+        }
+    )
+}
+

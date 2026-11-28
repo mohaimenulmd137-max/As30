@@ -2,6 +2,7 @@ package com.example.domain.model
 
 import androidx.compose.ui.text.font.FontFamily
 import com.example.R
+import com.example.domain.engine.SpeedRampEngine
 import com.example.ui.theme.HindSiliguriFamily
 import com.example.ui.theme.JetBrainsMonoFamily
 import com.example.ui.theme.NotoSansBengaliFamily
@@ -19,11 +20,15 @@ enum class AspectRatioPreset(val label: String, val ratio: Float, val width4k: I
 enum class PreviewResolution(val label: String, val shortEdge: Int) {
     P720("720p", 720),
     P1080("1080p", 1080),
+    QHD1440("1440p", 1440),
     UHD4K("4K", 2160)
 }
 
 enum class ExportFps(val fps: Int, val label: String) {
+    FPS24(24, "24 fps"),
+    FPS25(25, "25 fps"),
     FPS30(30, "30 fps"),
+    FPS50(50, "50 fps"),
     FPS60(60, "60 fps")
 }
 
@@ -539,6 +544,9 @@ data class TimelineClip(
     val title: String,
     val startMs: Long,
     val durationMs: Long,
+    val sourceDurationMs: Long = 0L,
+    val trimStartMs: Long = 0L,
+    val playbackSpeed: Float = 1.0f,
     val isLocked: Boolean = false,
     val isHidden: Boolean = false,
     val posX: Float = 0f,
@@ -566,10 +574,45 @@ data class TimelineClip(
     val chartConfig: ComparisonChartConfig? = null,
     val comparisonGrid: ComparisonGridConfig? = null,
     val investigativeConfig: InvestigativeDocConfig? = null,
+    val mapConfig: com.example.domain.map.UniversalMapConfig? = null,
     val audioConfig: AudioConfig = AudioConfig(),
     val mediaSource: MediaSource? = null
 ) {
     val endMs: Long get() = startMs + durationMs
+
+    val trimEndMs: Long
+        get() {
+            val safeTrimStart = trimStartMs.coerceAtLeast(0L)
+            val span = SpeedRampEngine.computeRemappedVideoTimeMs(
+                profile = speedRamp,
+                localMs = durationMs,
+                clipDurationMs = durationMs,
+                baseSpeed = playbackSpeed
+            )
+            val rawEnd = safeTrimStart + span
+            return if (sourceDurationMs > 0L) {
+                rawEnd.coerceIn(safeTrimStart.coerceAtMost(sourceDurationMs), sourceDurationMs)
+            } else {
+                rawEnd
+            }
+        }
+
+    fun computeSourcePositionMs(playheadMs: Long, loopWithinSource: Boolean = false): Long {
+        val localMs = (playheadMs - startMs).coerceIn(0L, durationMs.coerceAtLeast(0L))
+        val remappedMs = SpeedRampEngine.computeRemappedVideoTimeMs(
+            profile = speedRamp,
+            localMs = localMs,
+            clipDurationMs = durationMs,
+            baseSpeed = playbackSpeed
+        )
+        val rawSourceMs = (trimStartMs.coerceAtLeast(0L) + remappedMs).coerceAtLeast(0L)
+        if (sourceDurationMs <= 0L) return rawSourceMs
+        return if (loopWithinSource) {
+            rawSourceMs % sourceDurationMs
+        } else {
+            rawSourceMs.coerceIn(0L, (sourceDurationMs - 1L).coerceAtLeast(0L))
+        }
+    }
 }
 
 data class StudioProject(

@@ -363,6 +363,42 @@ fun OverlayProInspector(
             onUpdateClip = onUpdateClip
         )
     }
+
+    // Selected Clip Specific Editor: Universal Map Animation
+    clip?.mapConfig?.let { mapCfg ->
+        Surface(
+            color = Color(0xFF0E1D2C),
+            shape = RoundedCornerShape(10.dp),
+            border = BorderStroke(1.dp, CyanPlayhead.copy(alpha = 0.65f)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    text = "🗺️ ${mapCfg.title} (${if (mapCfg.projectionMode == com.example.domain.map.MapProjectionMode.GLOBE_3D) "3D Globe" else "2D Map"})",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = AmberDocumentary,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = if (isBangla) {
+                        "${mapCfg.regions.size} অঞ্চল · ${mapCfg.routes.size} রুট · ${mapCfg.markers.size} মার্কার · ${mapCfg.keyframes.size} কী-ফ্রেম"
+                    } else {
+                        "${mapCfg.regions.size} Regions · ${mapCfg.routes.size} Routes · ${mapCfg.markers.size} Markers"
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextSecondary
+                )
+                Button(
+                    onClick = onOpenMapStudio,
+                    colors = ButtonDefaults.buttonColors(containerColor = CyanPlayhead, contentColor = StudioObsidian),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(if (isBangla) "🗺️ ইউনিভার্সাল ম্যাপ স্টুডিও-তে এডিট করুন" else "Edit in Universal Map Studio", fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
 }
 
 @Composable
